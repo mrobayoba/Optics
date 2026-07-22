@@ -1,16 +1,18 @@
-# Fraunhofer Diffraction Simulator
+# Fraunhofer and Fresnel Diffraction Simulators
 
 Analytical and numerical 2D Fraunhofer diffraction simulator for Taller 4,
-exercise 20.
+exercise 20, plus an analytical slit and straight-edge Fresnel simulator for
+exercise 22.
 It supports a finite slit, a rectangular opening, a circular opening, and a
 coherent collection containing independently sized and positioned primitives
 of all three types. Arbitrary custom openings can also be entered as a safe
 mathematical expression, Python callable, or binary/grayscale image.
 
-The interactive interface is
-[`fraunhofer_simulator.ipynb`](fraunhofer_simulator.ipynb), built with
-Jupyter, `ipywidgets`, NumPy, SciPy, and Matplotlib. The physics remains in
-plain Python modules so it can be tested and reused without the notebook.
+The interactive interfaces are
+[`fraunhofer_simulator.ipynb`](fraunhofer_simulator.ipynb) and
+[`fresnel_simulator.ipynb`](fresnel_simulator.ipynb), built with Jupyter,
+`ipywidgets`, NumPy, SciPy, Pillow, and Matplotlib. Physics remains in plain
+Python modules so it can be tested and reused without either notebook.
 
 ## Project structure
 
@@ -30,16 +32,31 @@ plain Python modules so it can be tested and reused without the notebook.
   dashboard, controls, callbacks, layout, and optional analytical views.
 - [`fraunhofer_simulator.ipynb`](fraunhofer_simulator.ipynb): interactive
   analytical sanity checks plus a minimal dashboard import/launch cell.
+- [`fresnel_engine.py`](fresnel_engine.py): analytical Cornu/Fresnel-integral
+  fields for slit and straight-edge diffraction.
+- [`fresnel_screen_tools.py`](fresnel_screen_tools.py): Fresnel camera
+  sampling, orientation, and shadow-side mapping.
+- [`fresnel_config.py`](fresnel_config.py): Fresnel-specific control ranges and
+  regime thresholds.
+- [`fresnel_dashboard_tools.py`](fresnel_dashboard_tools.py): Fresnel optical
+  schematic, aperture/edge preview, camera, and Cornu construction.
+- [`fresnel_style.py`](fresnel_style.py): self-contained slit/edge dashboard.
+- [`fresnel_simulator.ipynb`](fresnel_simulator.ipynb): source-document sanity
+  checks and minimal Fresnel dashboard launcher.
 - [`tests/test_diffraction_engine.py`](tests/test_diffraction_engine.py):
   analytical and validity regression tests.
 - [`tests/test_dashboard_tools.py`](tests/test_dashboard_tools.py):
   dashboard color and rendering regression tests.
 - [`tests/test_fourier_transform.py`](tests/test_fourier_transform.py):
   arbitrary-aperture, input-safety, image, FFT, and scaling tests.
+- [`tests/test_fresnel_engine.py`](tests/test_fresnel_engine.py): Fresnel
+  formulas, geometry, regimes, orientation, and shadow-side tests.
+- [`tests/test_fresnel_dashboard.py`](tests/test_fresnel_dashboard.py):
+  Fresnel visual, Cornu, and widget regressions.
 - [`theory and context/`](theory%20and%20context/): the source PDF, exercise
   image, and condensed theory note.
 
-## Physical model
+## Fraunhofer physical model
 
 All internal lengths use SI units. The UI accepts the vacuum wavelength
 `lambda_0` and refractive index `n`; propagation uses
@@ -93,7 +110,52 @@ The input mask is centered, symmetrically zero-padded, transformed with
 analytical cases. Normalized intensity is divided by the squared effective
 open area, so the on-axis sample is one.
 
-## Mandatory far-field check
+## Fresnel physical model
+
+The Fresnel notebook uses SciPy's normalized integrals:
+
+```text
+C(u) = integral(cos(pi*t^2/2), 0, u)
+S(u) = integral(sin(pi*t^2/2), 0, u)
+```
+
+For a centered slit, the field is the Cornu chord between its dimensionless
+edge coordinates:
+
+```text
+field = [(C(u2)-C(u1)) + i*(S(u2)-S(u1))] / sqrt(2)
+I/I0 = |field|^2
+```
+
+For an edge, positive `u` is defined as the geometrical shadow:
+
+```text
+field = [(1/2-C(u)) + i*(1/2-S(u))] / sqrt(2)
+```
+
+This gives `I/I0 = 1` deep in the illuminated region, `1/4` at the
+geometrical boundary, and zero deep in the shadow.
+
+Plane-wave illumination uses `u = x*sqrt(2/(lambda_medium*D))`. Point-source
+illumination adds source distance `d`, geometrical magnification
+`(d+D)/d`, and effective distance
+
+```text
+D_effective = d*D/(d+D)
+```
+
+For a slit of full width `b`, the reported value is
+`N_F = b^2/(4*lambda_medium*D_effective)`. It is informational in the Fresnel
+notebook. The Advanced panel exposes a logarithmic selected condition
+`N_F >= N_F,min` across `0.0001`–`10`, defaulting to `0.1`. This adjustable
+criterion controls only the PASS/NOT MET teaching indicator. Conventional
+labels remain fixed: values below `0.1` identify the Fraunhofer limit, values
+from `0.1` to `1` are the Fresnel transition, and values at least `1` are
+developed Fresnel near field. The criterion never blocks the more general
+Fresnel solution. A straight edge has no finite support radius, so the control
+is disabled and its status reports the characteristic screen length.
+
+## Mandatory Fraunhofer far-field check
 
 The source states that observation distance must be much greater than the
 aperture-dependent quadratic phase scale. Because `>>` is not a numerical
@@ -107,11 +169,11 @@ where `R_max` is the largest radius from the optical axis to any point in any
 configured opening. The default `N_F,max` is `0.1` and can be made stricter in
 the notebook's Advanced controls.
 
-The gate runs before the observation grid or Fourier-transform array is
-allocated. A custom input mask must first be sampled to determine its support
-radius. Invalid propagation input raises `FarFieldError`. The dashboard continues to
-show the selected aperture and optical path, but replaces the diffraction
-camera with a warning that reports
+The Fraunhofer gate runs before the observation grid or Fourier-transform
+array is allocated. A custom input mask must first be sampled to determine its
+support radius. Invalid propagation input raises `FarFieldError`. The
+Fraunhofer dashboard continues to show the selected aperture and optical path,
+but replaces the diffraction camera with a warning that reports
 
 ```text
 z_required = R_max^2 / (lambda_medium * N_F,max)
@@ -131,15 +193,15 @@ pip install -r requirements.txt
 jupyter lab
 ```
 
-Open `Diffraction/fraunhofer_simulator.ipynb`, select the repository's Python
-kernel, and run all cells. The friendly dashboard then keeps three views
-together:
+Open either notebook, select the repository's Python kernel, and run all
+cells. Both dashboards keep three views together:
 
 - a live source → aperture → observation-plane schematic;
 - a dark aperture-plane preview with all selected openings;
-- a wavelength-colored Fraunhofer camera preview with a physical scale bar.
+- a wavelength-colored diffraction camera preview with a physical scale bar.
 
-Use the button selector for **Slit**, **Rectangle**, **Circle**, **Multiple**,
+In the Fraunhofer notebook, use the selector for **Slit**, **Rectangle**,
+**Circle**, **Multiple**,
 or **Custom**. Slits expose width, finite length, and vertical/horizontal
 orientation. Multiple mode can add or remove independently sized and
 positioned slit, rectangle, and circle openings. Custom mode accepts either a
@@ -159,6 +221,13 @@ update and **Reset** restores all configured defaults.
 
 The optional **Profiles** button adds analytical horizontal and vertical line
 graphs below the main dashboard.
+
+In the Fresnel notebook, select **Slit** or **Edge**, then choose plane-wave or
+finite point-source illumination. A slit exposes width and orientation. An
+edge exposes orientation and which signed side is shadowed. **Profiles** plots
+physical `I/I0`; **Cornu spiral** exposes a screen-coordinate probe and draws
+the chord whose squared length produces that intensity. Fresnel number is
+shown as regime information and does not disable the calculation.
 
 ## Python API example
 
@@ -182,6 +251,26 @@ result = screen.simulate_pattern(
     resolution=401,
 )
 print(result.far_field)
+```
+
+The Fresnel API supports the same vacuum-wavelength and refractive-index
+conventions:
+
+```python
+import fresnel_screen_tools as fresnel
+
+result = fresnel.simulate_pattern(
+    "slit",
+    wavelength_vacuum=633e-9,
+    distance=0.5,
+    slit_width=1e-3,
+    illumination="point",
+    source_distance=1.0,
+    orientation="vertical",
+    screen_half_width=5e-3,
+    resolution=401,
+)
+print(result.report.fresnel_number)
 ```
 
 Arbitrary callables receive aperture-plane `X, Y` arrays in metres:
@@ -251,7 +340,10 @@ double-slit interference, mixed-shape intensity, refractive-index scaling,
 first-minimum helpers, rejection before allocation, custom callable,
 expression and image construction, expression safety, FFT normalization and
 padding, numerical rectangle/Airy minima, wavelength-color mapping, and
-dashboard rendering and custom-control behavior.
+dashboard rendering and custom-control behavior. Fresnel regressions also
+cover the PDF's slit/edge values, edge limits, Cornu chord intensity,
+point-source geometry, sinc-squared convergence, orientation, shadow side,
+regime reporting, and dashboard controls.
 
 ## References
 
@@ -260,3 +352,8 @@ The formulas and coordinate conventions follow
 especially the rectangular aperture/slit, circular aperture, translated
 aperture, and far-field sections. The exercise statement is preserved in
 [`theory and context/Screenshot 2026-07-19 121417.png`](theory%20and%20context/Screenshot%202026-07-19%20121417.png).
+
+The Fresnel formulas, source geometry, and Cornu construction follow
+[`theory and context/Difraccion_Fresnel_Clotoide.pdf`](theory%20and%20context/Difraccion_Fresnel_Clotoide.pdf).
+`scipy.special.fresnel` uses the same normalized `S(u), C(u)` convention and
+returns them in that order.
