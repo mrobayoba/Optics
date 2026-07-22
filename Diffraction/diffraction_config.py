@@ -17,6 +17,7 @@ __all__ = [
     "VIEW_OPTIONS",
     "DEFAULT_ACTIVE_VIEWS",
     "DASHBOARD_CASE_OPTIONS",
+    "CUSTOM_INPUT_MODE_OPTIONS",
     "EXTRA_VIEW_OPTIONS",
     "DEFAULT_AUTO_UPDATE",
     "WAVELENGTH_NM",
@@ -31,6 +32,16 @@ __all__ = [
     "APERTURE_HEIGHT_UM",
     "CIRCLE_RADIUS_UM",
     "CENTER_MM",
+    "CUSTOM_WIDTH_MM",
+    "CUSTOM_HEIGHT_MM",
+    "CUSTOM_MASK_RESOLUTION",
+    "CUSTOM_IMAGE_THRESHOLD",
+    "CUSTOM_FFT_PADDING",
+    "DEFAULT_CUSTOM_EXPRESSION",
+    "CUSTOM_EXPRESSION_HELP",
+    "CUSTOM_EXPRESSION_MAX_LENGTH",
+    "CUSTOM_EXPRESSION_MAX_NODES",
+    "CUSTOM_MAX_EXPONENT",
     "DEFAULT_SLIT_WIDTH_M",
     "DEFAULT_SLIT_LENGTH_M",
     "DEFAULT_RECTANGLE_WIDTH_M",
@@ -99,6 +110,7 @@ CASE_OPTIONS = (
     ("Rectangular aperture", "rectangle"),
     ("Circular aperture", "circle"),
     ("Multiple / mixed apertures", "multiple"),
+    ("Custom aperture", "custom"),
 )
 
 SHAPE_OPTIONS = (
@@ -125,10 +137,14 @@ DASHBOARD_CASE_OPTIONS = (
     ("Rectangle", "rectangle"),
     ("Circle", "circle"),
     ("Multiple", "multiple"),
+    ("Custom", "custom"),
+)
+CUSTOM_INPUT_MODE_OPTIONS = (
+    ("Expression", "expression"),
+    ("Image", "image"),
 )
 EXTRA_VIEW_OPTIONS = (
     ("Profiles", "profiles"),
-    ("Detailed geometry", "geometry"),
 )
 DEFAULT_AUTO_UPDATE = True
 
@@ -151,6 +167,25 @@ APERTURE_WIDTH_UM = NumericControl(5.0, 2_000.0, 5.0, 80.0, 1e-6)
 APERTURE_HEIGHT_UM = NumericControl(5.0, 2_000.0, 5.0, 400.0, 1e-6)
 CIRCLE_RADIUS_UM = NumericControl(5.0, 1_000.0, 5.0, 150.0, 1e-6)
 CENTER_MM = NumericControl(-5.0, 5.0, 0.01, 0.0, 1e-3)
+CUSTOM_WIDTH_MM = NumericControl(0.05, 5.0, 0.01, 0.5, 1e-3)
+CUSTOM_HEIGHT_MM = NumericControl(0.05, 5.0, 0.01, 0.5, 1e-3)
+CUSTOM_MASK_RESOLUTION = NumericControl(64.0, 512.0, 64.0, 256.0)
+CUSTOM_IMAGE_THRESHOLD = NumericControl(0.0, 1.0, 0.01, 0.5)
+CUSTOM_FFT_PADDING = NumericControl(1.0, 8.0, 1.0, 4.0)
+
+DEFAULT_CUSTOM_EXPRESSION = (
+    "((abs(x) <= 0.18) & (abs(y) <= 0.045)) | "
+    "((abs(y) <= 0.18) & (abs(x) <= 0.045))"
+)
+CUSTOM_EXPRESSION_HELP = (
+    "<b>x, y, r are in mm.</b> Use comparisons, + - * / **, & | ~, "
+    "and abs, sin, cos, tan, exp, log, sqrt, sinc, hypot, minimum, "
+    "maximum, or where. Open pixels evaluate to True or a value in [0, 1]. "
+    "Invert swaps the expression's open and closed regions."
+)
+CUSTOM_EXPRESSION_MAX_LENGTH = 500
+CUSTOM_EXPRESSION_MAX_NODES = 128
+CUSTOM_MAX_EXPONENT = 8.0
 
 DEFAULT_SLIT_WIDTH_M = APERTURE_WIDTH_UM.to_si(APERTURE_WIDTH_UM.default)
 DEFAULT_SLIT_LENGTH_M = APERTURE_HEIGHT_UM.to_si(APERTURE_HEIGHT_UM.default)
@@ -201,8 +236,8 @@ DASHBOARD_CARD_BORDER = "1px solid #cbd5e1"
 DASHBOARD_CARD_PADDING = "12px"
 DASHBOARD_CARD_MARGIN = "6px"
 WAVELENGTH_GRADIENT_CSS = (
-    "linear-gradient(90deg, #6f00ff 0%, #004cff 18%, #00b7ff 31%, "
-    "#00d05a 45%, #ffe600 62%, #ff7a00 78%, #e00000 100%)"
+    "linear-gradient(90deg, #6f00ff 0%, #0000ff 15%, #00ffff 27.5%, "
+    "#00ff00 32.5%, #ffff00 50%, #ff0000 66.25%, #660000 100%)"
 )
 STATUS_PASS_COLOR = "#16794b"
 STATUS_FAIL_COLOR = "#b42318"

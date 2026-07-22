@@ -27,6 +27,8 @@ __all__ = [
     "FarFieldError",
     "medium_wavelength",
     "aperture_support_radius",
+    "evaluate_far_field_radius",
+    "require_far_field_radius",
     "evaluate_far_field",
     "require_far_field",
     "spatial_frequencies",
@@ -202,6 +204,53 @@ def aperture_support_radius(apertures: Sequence[Aperture]) -> float:
     return max(aperture.support_radius for aperture in items)
 
 
+def evaluate_far_field_radius(
+    support_radius: float,
+    wavelength_vacuum: float,
+    distance: float,
+    n: float = 1.0,
+    max_fresnel_number: float = config.MAX_FRESNEL_NUMBER.default,
+) -> FarFieldReport:
+    """Evaluate the Fraunhofer criterion for a known support radius."""
+    wavelength = medium_wavelength(wavelength_vacuum, n)
+    distance = _require_positive_finite(distance, "distance")
+    threshold = _require_positive_finite(
+        max_fresnel_number, "max_fresnel_number"
+    )
+    radius = _require_positive_finite(support_radius, "support_radius")
+    fresnel_number = radius**2 / (wavelength * distance)
+    required_distance = radius**2 / (wavelength * threshold)
+    return FarFieldReport(
+        is_valid=fresnel_number <= threshold,
+        fresnel_number=fresnel_number,
+        max_fresnel_number=threshold,
+        required_distance=required_distance,
+        distance=distance,
+        wavelength_medium=wavelength,
+        support_radius=radius,
+    )
+
+
+def require_far_field_radius(
+    support_radius: float,
+    wavelength_vacuum: float,
+    distance: float,
+    n: float = 1.0,
+    max_fresnel_number: float = config.MAX_FRESNEL_NUMBER.default,
+) -> FarFieldReport:
+    """Return a radius-based report or raise :class:`FarFieldError`."""
+    report = evaluate_far_field_radius(
+        support_radius,
+        wavelength_vacuum,
+        distance,
+        n,
+        max_fresnel_number,
+    )
+    if not report.is_valid:
+        raise FarFieldError(report)
+    return report
+
+
 def evaluate_far_field(
     apertures: Sequence[Aperture],
     wavelength_vacuum: float,
@@ -215,22 +264,12 @@ def evaluate_far_field(
     far-field ``much greater than`` condition.  No diffraction field is
     evaluated by this function.
     """
-    wavelength = medium_wavelength(wavelength_vacuum, n)
-    distance = _require_positive_finite(distance, "distance")
-    threshold = _require_positive_finite(
-        max_fresnel_number, "max_fresnel_number"
-    )
-    radius = aperture_support_radius(apertures)
-    fresnel_number = radius**2 / (wavelength * distance)
-    required_distance = radius**2 / (wavelength * threshold)
-    return FarFieldReport(
-        is_valid=fresnel_number <= threshold,
-        fresnel_number=fresnel_number,
-        max_fresnel_number=threshold,
-        required_distance=required_distance,
-        distance=distance,
-        wavelength_medium=wavelength,
-        support_radius=radius,
+    return evaluate_far_field_radius(
+        aperture_support_radius(apertures),
+        wavelength_vacuum,
+        distance,
+        n,
+        max_fresnel_number,
     )
 
 

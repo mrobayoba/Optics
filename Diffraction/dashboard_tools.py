@@ -12,21 +12,43 @@ from collections.abc import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.patches import Circle, FancyBboxPatch, Polygon, Rectangle
+from matplotlib.patches import Circle, Polygon, Rectangle
 
 import diffraction_config as config
 import diffraction_engine as engine
+import fourier_transform as fourier
 
 __all__ = [
     "wavelength_to_rgb",
+    "wavelength_to_spectrum_position",
     "intensity_to_rgb",
     "nice_scale_length",
     "add_scale_bar",
     "draw_optical_schematic",
     "draw_aperture_preview",
+    "draw_custom_aperture_preview",
     "draw_diffraction_preview",
     "draw_far_field_unavailable",
 ]
+
+
+def wavelength_to_spectrum_position(wavelength_nm: float) -> float:
+    """Return the wavelength marker position on the visible-spectrum bar."""
+    wavelength_nm = float(wavelength_nm)
+    if not np.isfinite(wavelength_nm) or wavelength_nm <= 0.0:
+        raise ValueError("wavelength_nm must be a positive finite value.")
+    visible = float(
+        np.clip(
+            wavelength_nm,
+            config.VISIBLE_WAVELENGTH_MIN_NM,
+            config.VISIBLE_WAVELENGTH_MAX_NM,
+        )
+    )
+    span = (
+        config.VISIBLE_WAVELENGTH_MAX_NM
+        - config.VISIBLE_WAVELENGTH_MIN_NM
+    )
+    return 100.0 * (visible - config.VISIBLE_WAVELENGTH_MIN_NM) / span
 
 
 def wavelength_to_rgb(wavelength_nm: float) -> tuple[float, float, float]:
@@ -163,32 +185,25 @@ def add_scale_bar(
 
 def draw_optical_schematic(
     axis: Axes,
-    apertures: Sequence[engine.Aperture],
+    apertures: Sequence[engine.Aperture] | None,
     distance: float,
     wavelength_nm: float,
     report: engine.FarFieldReport,
+    opening_count: int | None = None,
 ) -> None:
     """Draw a compact source-to-aperture-to-screen teaching schematic."""
-    if not apertures:
-        raise ValueError("At least one aperture is required.")
+    if opening_count is None:
+        if not apertures:
+            raise ValueError("At least one aperture is required.")
+        opening_count = len(apertures)
+    if opening_count < 1:
+        raise ValueError("opening_count must be at least one.")
     color = wavelength_to_rgb(wavelength_nm)
     source_x, aperture_x, screen_x = 0.12, 0.48, 0.90
-    source_width, source_height = 0.17, 0.22
 
     axis.set_facecolor("#f8fafc")
-    source = FancyBboxPatch(
-        (source_x - source_width / 2.0, 0.5 - source_height / 2.0),
-        source_width,
-        source_height,
-        boxstyle="round,pad=0.015,rounding_size=0.025",
-        facecolor="#d0d5dd",
-        edgecolor="#344054",
-        linewidth=1.2,
-    )
-    axis.add_patch(source)
-    axis.add_patch(
-        Circle((source_x, 0.5), source_height * 0.27, color=color, alpha=0.95)
-    )
+    axis.scatter([source_x], [0.5], s=420, color=color, alpha=0.18)
+    axis.scatter([source_x], [0.5], s=95, color=color, edgecolor="none")
 
     aperture_plane = Rectangle(
         (aperture_x - 0.012, 0.37),
@@ -211,7 +226,7 @@ def draw_optical_schematic(
     axis.add_patch(aperture_plane)
     axis.add_patch(screen)
 
-    beam_start = source_x + source_width / 2.0
+    beam_start = source_x
     axis.fill(
         [beam_start, aperture_x, aperture_x, beam_start],
         [0.47, 0.485, 0.515, 0.53],
@@ -243,11 +258,11 @@ def draw_optical_schematic(
         va="center",
         color="#344054",
     )
-    axis.text(source_x, 0.76, f"Source\n{wavelength_nm:g} nm", ha="center")
+    axis.text(source_x, 0.76, f"Source\n{wavelength_nm:.2f} nm", ha="center")
     axis.text(
         aperture_x,
         0.76,
-        f"Aperture\n{len(apertures)} opening(s)",
+        f"Aperture\n{opening_count} opening(s)",
         ha="center",
     )
     axis.text(screen_x, 0.76, "Observation\nplane", ha="center")
@@ -308,6 +323,36 @@ def draw_aperture_preview(
 
     axis.set(xlim=extent[:2], ylim=extent[2:], aspect="equal")
     axis.set_title("APERTURE PLANE", color="white", fontsize=11, pad=10)
+    axis.axis("off")
+    add_scale_bar(axis, extent, "mm")
+    return extent
+
+
+def draw_custom_aperture_preview(
+    axis: Axes,
+    aperture: fourier.CustomAperture,
+) -> tuple[float, float, float, float]:
+    """Render a sampled custom opening on the standard dark aperture card."""
+    millimetres = config.CENTER_MM.display_to_si
+    extent = (
+        (aperture.x_axis[0] - aperture.dx / 2.0) / millimetres,
+        (aperture.x_axis[-1] + aperture.dx / 2.0) / millimetres,
+        (aperture.y_axis[0] - aperture.dy / 2.0) / millimetres,
+        (aperture.y_axis[-1] + aperture.dy / 2.0) / millimetres,
+    )
+    axis.set_facecolor(config.PANEL_BACKGROUND)
+    axis.imshow(
+        aperture.transmittance,
+        origin="lower",
+        extent=extent,
+        cmap="gray",
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+        aspect="equal",
+    )
+    axis.set(xlim=extent[:2], ylim=extent[2:])
+    axis.set_title("CUSTOM APERTURE PLANE", color="white", fontsize=11, pad=10)
     axis.axis("off")
     add_scale_bar(axis, extent, "mm")
     return extent

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import sys
 import unittest
+from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import matplotlib
 
@@ -12,16 +15,40 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 
 DIFFRACTION_DIR = Path(__file__).resolve().parents[1]
 if str(DIFFRACTION_DIR) not in sys.path:
     sys.path.insert(0, str(DIFFRACTION_DIR))
 
 import dashboard_tools as dashboard
+import diffraction_config as config
 import diffraction_engine as engine
+import diffraction_style
+import fourier_transform as fourier
 
 
 class WavelengthColorTests(unittest.TestCase):
+    def test_wavelength_control_has_hundredth_nanometre_precision(self):
+        self.assertEqual(config.WAVELENGTH_NM.step, 0.01)
+
+    def test_profiles_is_the_only_optional_dashboard_view(self):
+        self.assertEqual(config.EXTRA_VIEW_OPTIONS, (("Profiles", "profiles"),))
+
+    def test_spectrum_marker_uses_visible_wavelength_scale(self):
+        self.assertEqual(
+            dashboard.wavelength_to_spectrum_position(380.0), 0.0
+        )
+        self.assertEqual(
+            dashboard.wavelength_to_spectrum_position(580.0), 50.0
+        )
+        self.assertEqual(
+            dashboard.wavelength_to_spectrum_position(780.0), 100.0
+        )
+        self.assertEqual(
+            dashboard.wavelength_to_spectrum_position(1_000.0), 100.0
+        )
+
     def test_visible_wavelengths_have_expected_dominant_channels(self):
         violet = dashboard.wavelength_to_rgb(420.0)
         green = dashboard.wavelength_to_rgb(530.0)
@@ -105,6 +132,10 @@ class DashboardDrawingTests(unittest.TestCase):
 
         self.assertEqual(len(extent), 4)
         self.assertGreater(len(axes[0].patches), 0)
+        source_color = axes[0].collections[0].get_facecolor()[0, :3]
+        np.testing.assert_allclose(
+            source_color, dashboard.wavelength_to_rgb(633.0)
+        )
         self.assertEqual(len(axes[1].patches), len(self.apertures))
 
     def test_diffraction_and_invalid_previews_draw(self):
@@ -121,6 +152,96 @@ class DashboardDrawingTests(unittest.TestCase):
         self.assertEqual(len(extent), 4)
         self.assertEqual(len(axes[0].images), 1)
         self.assertGreaterEqual(len(axes[1].texts), 2)
+
+    def test_custom_raster_preview_is_centered_and_scaled(self):
+        aperture = fourier.CustomAperture.from_expression(
+            "(abs(x) < 0.15) & (abs(y) < 0.05)",
+            width=0.5e-3,
+            height=0.3e-3,
+            resolution=64,
+        )
+        figure, axis = plt.subplots()
+        extent = dashboard.draw_custom_aperture_preview(axis, aperture)
+
+        self.assertEqual(len(axis.images), 1)
+        self.assertAlmostEqual(extent[0], -extent[1])
+        self.assertAlmostEqual(extent[2], -extent[3])
+        self.assertEqual(axis.get_aspect(), 1.0)
+
+
+class DashboardWidgetTests(unittest.TestCase):
+    def test_dashboard_module_builds_widget_and_all_case_models(self):
+        app = diffraction_style.FraunhoferDashboard()
+        app.auto_update.value = False
+
+        self.assertIsNotNone(app.widget)
+        self.assertEqual(
+            app.aperture_preview_output.layout.justify_content, "center"
+        )
+        self.assertEqual(
+            app.diffraction_preview_output.layout.justify_content, "center"
+        )
+        for case_name in ("slit", "rectangle", "circle", "multiple"):
+            app.case.value = case_name
+            self.assertGreater(len(app._build_apertures()), 0)
+        app.case.value = "custom"
+        self.assertEqual(
+            app._build_custom_aperture().transmittance.shape, (256, 256)
+        )
+
+    def test_custom_mode_switches_controls_and_reset_restores_defaults(self):
+        app = diffraction_style.FraunhoferDashboard()
+        app.auto_update.value = False
+        app.case.value = "custom"
+        self.assertIn(app.custom_expression, app.custom_mode_controls.children)
+        self.assertIn(app.custom_invert, app.custom_mode_controls.children)
+        normal = app._build_custom_aperture()
+        app.custom_invert.value = True
+        inverted = app._build_custom_aperture()
+        np.testing.assert_array_equal(
+            inverted.transmittance, 1.0 - normal.transmittance
+        )
+
+        app.custom_mode.value = "image"
+        self.assertIn(app.custom_upload, app.custom_mode_controls.children)
+        app.custom_width.value = 1.25
+        app.custom_invert.value = True
+        app.reset()
+
+        self.assertEqual(app.case.value, "slit")
+        self.assertEqual(app.custom_mode.value, "expression")
+        self.assertEqual(app.custom_width.value, config.CUSTOM_WIDTH_MM.default)
+        self.assertFalse(app.custom_invert.value)
+
+    def test_uploaded_image_bytes_are_parsed_for_custom_builder(self):
+        pixels = np.zeros((16, 16), dtype=np.uint8)
+        pixels[4:12, 4:12] = 255
+        buffer = BytesIO()
+        Image.fromarray(pixels).save(buffer, format="PNG")
+        data = buffer.getvalue()
+        upload = SimpleNamespace(
+            value=({"name": "mask.png", "content": memoryview(data)},)
+        )
+        self.assertEqual(
+            diffraction_style.FraunhoferDashboard._uploaded_file_bytes(upload),
+            data,
+        )
+
+        app = diffraction_style.FraunhoferDashboard()
+        app.auto_update.value = False
+        app.case.value = "custom"
+        app.custom_mode.value = "image"
+        app.custom_upload.value = (
+            {
+                "name": "mask.png",
+                "type": "image/png",
+                "size": len(data),
+                "content": memoryview(data),
+                "last_modified": datetime.now(timezone.utc),
+            },
+        )
+        custom = app._build_custom_aperture()
+        self.assertGreater(custom.area, 0.0)
 
 
 if __name__ == "__main__":
