@@ -189,6 +189,23 @@ class DashboardWidgetTests(unittest.TestCase):
             app._build_custom_aperture().transmittance.shape, (256, 256)
         )
 
+    def test_multiple_mode_can_add_obstacle_with_same_shapes(self):
+        app = diffraction_style.FraunhoferDashboard()
+        app.auto_update.value = False
+        app.case.value = "multiple"
+        initial = len(app.aperture_rows)
+        app._add_obstacle_button_clicked()
+        self.assertEqual(len(app.aperture_rows), initial + 1)
+        obstacle_row = app.aperture_rows[-1]
+        self.assertEqual(obstacle_row["role"].value, "obstacle")
+        for shape in ("slit", "rectangle", "circle"):
+            obstacle_row["shape"].value = shape
+            apertures = app._build_apertures()
+            self.assertTrue(apertures[-1].is_obstacle)
+            self.assertEqual(apertures[-1].kind.value, shape)
+        obstacle_row["role"].value = "opening"
+        self.assertFalse(app._build_apertures()[-1].is_obstacle)
+
     def test_custom_mode_switches_controls_and_reset_restores_defaults(self):
         app = diffraction_style.FraunhoferDashboard()
         app.auto_update.value = False

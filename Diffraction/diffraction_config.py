@@ -13,6 +13,7 @@ __all__ = [
     "NumericControl",
     "CASE_OPTIONS",
     "SHAPE_OPTIONS",
+    "ROLE_OPTIONS",
     "SLIT_ORIENTATION_OPTIONS",
     "VIEW_OPTIONS",
     "DEFAULT_ACTIVE_VIEWS",
@@ -67,6 +68,8 @@ __all__ = [
     "DASHBOARD_BACKGROUND",
     "PANEL_BACKGROUND",
     "APERTURE_COLOR",
+    "APERTURE_OBSTACLE_COLOR",
+    "APERTURE_OBSTACLE_EDGE",
     "SCHEMATIC_BEAM_ALPHA",
     "SCALE_BAR_FRACTION",
     "SCALE_BAR_LINEWIDTH",
@@ -109,7 +112,7 @@ CASE_OPTIONS = (
     ("Slit", "slit"),
     ("Rectangular aperture", "rectangle"),
     ("Circular aperture", "circle"),
-    ("Multiple / mixed apertures", "multiple"),
+    ("Multiple / mixed openings & obstacles", "multiple"),
     ("Custom aperture", "custom"),
 )
 
@@ -117,6 +120,11 @@ SHAPE_OPTIONS = (
     ("Slit", "slit"),
     ("Rectangle", "rectangle"),
     ("Circle", "circle"),
+)
+
+ROLE_OPTIONS = (
+    ("Opening", "opening"),
+    ("Obstacle", "obstacle"),
 )
 
 SLIT_ORIENTATION_OPTIONS = (
@@ -219,6 +227,8 @@ INTENSITY_DISPLAY_GAMMA = 1.0 / SECONDARY_MAXIMA_BOOST.default
 DASHBOARD_BACKGROUND = "#0b1020"
 PANEL_BACKGROUND = "#02040a"
 APERTURE_COLOR = "#f8fafc"
+APERTURE_OBSTACLE_COLOR = "#0f172a"
+APERTURE_OBSTACLE_EDGE = "#94a3b8"
 SCHEMATIC_BEAM_ALPHA = 0.28
 SCALE_BAR_FRACTION = 0.22
 SCALE_BAR_LINEWIDTH = 3.0

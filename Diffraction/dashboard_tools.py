@@ -287,7 +287,7 @@ def draw_aperture_preview(
     axis: Axes,
     apertures: Sequence[engine.Aperture],
 ) -> tuple[float, float, float, float]:
-    """Render all openings as white shapes on a dark aperture plane."""
+    """Render openings (white) and obstacles (dark) on the aperture plane."""
     if not apertures:
         raise ValueError("At least one aperture is required.")
     millimetres = config.CENTER_MM.display_to_si
@@ -295,17 +295,29 @@ def draw_aperture_preview(
     limit = config.APERTURE_VIEW_MARGIN * support / millimetres
     extent = (-limit, limit, -limit, limit)
 
-    axis.set_facecolor(config.PANEL_BACKGROUND)
+    has_obstacle = any(aperture.is_obstacle for aperture in apertures)
+    # Obstacles sit in an otherwise open plane: use a lighter background so
+    # dark silhouettes remain readable. Pure openings stay on the dark card.
+    axis.set_facecolor(
+        "#334155" if has_obstacle else config.PANEL_BACKGROUND
+    )
     for aperture in apertures:
         center_x = aperture.center_x / millimetres
         center_y = aperture.center_y / millimetres
+        if aperture.is_obstacle:
+            face = config.APERTURE_OBSTACLE_COLOR
+            edge = config.APERTURE_OBSTACLE_EDGE
+        else:
+            face = config.APERTURE_COLOR
+            edge = config.APERTURE_COLOR
         if aperture.kind == engine.ApertureKind.CIRCLE:
             assert aperture.radius is not None
             patch = Circle(
                 (center_x, center_y),
                 aperture.radius / millimetres,
-                facecolor=config.APERTURE_COLOR,
-                edgecolor=config.APERTURE_COLOR,
+                facecolor=face,
+                edgecolor=edge,
+                linewidth=1.2,
             )
         else:
             assert aperture.width is not None and aperture.height is not None
@@ -316,13 +328,19 @@ def draw_aperture_preview(
                 ),
                 aperture.width / millimetres,
                 aperture.height / millimetres,
-                facecolor=config.APERTURE_COLOR,
-                edgecolor=config.APERTURE_COLOR,
+                facecolor=face,
+                edgecolor=edge,
+                linewidth=1.2,
             )
         axis.add_patch(patch)
 
+    title = (
+        "OPENINGS & OBSTACLES"
+        if has_obstacle
+        else "APERTURE PLANE"
+    )
     axis.set(xlim=extent[:2], ylim=extent[2:], aspect="equal")
-    axis.set_title("APERTURE PLANE", color="white", fontsize=11, pad=10)
+    axis.set_title(title, color="white", fontsize=11, pad=10)
     axis.axis("off")
     add_scale_bar(axis, extent, "mm")
     return extent

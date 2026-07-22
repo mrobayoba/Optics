@@ -89,6 +89,34 @@ class ApertureAmplitudeTests(unittest.TestCase):
         )
         np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-20)
 
+    def test_obstacle_is_negative_of_matching_opening(self):
+        opening = engine.Aperture.rectangle(60e-6, 90e-6, center_x=40e-6)
+        obstacle = engine.Aperture.rectangle(
+            60e-6, 90e-6, center_x=40e-6, is_obstacle=True
+        )
+        fx = np.linspace(-15_000.0, 15_000.0, 41)
+        fy = np.linspace(-8_000.0, 8_000.0, 41)
+        FX, FY = np.meshgrid(fx, fy)
+
+        opening_field = engine.aperture_amplitude(FX, FY, opening)
+        obstacle_field = engine.aperture_amplitude(FX, FY, obstacle)
+
+        np.testing.assert_allclose(obstacle_field, -opening_field)
+        np.testing.assert_allclose(
+            np.abs(obstacle_field) ** 2, np.abs(opening_field) ** 2
+        )
+        self.assertEqual(obstacle.signed_area, -opening.area)
+
+    def test_opening_plus_matching_obstacle_cancels(self):
+        apertures = [
+            engine.Aperture.circle(80e-6),
+            engine.Aperture.circle(80e-6, is_obstacle=True),
+        ]
+        fx = np.linspace(-10_000.0, 10_000.0, 31)
+        fy = np.zeros_like(fx)
+        field = engine.composite_amplitude(fx, fy, apertures)
+        np.testing.assert_allclose(field, 0.0, atol=1e-18)
+
     def test_mixed_aperture_intensity_is_finite_and_normalized(self):
         apertures = [
             engine.Aperture.slit(30e-6, 120e-6, center_x=-200e-6),

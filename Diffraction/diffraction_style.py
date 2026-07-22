@@ -122,7 +122,7 @@ class FraunhoferDashboard:
                 "Single slit",
                 "Rectangle",
                 "Circle",
-                "Multiple mixed openings",
+                "Multiple mixed openings and obstacles",
                 "Expression or binary-image opening",
             ),
             style={"description_width": "initial"},
@@ -144,6 +144,9 @@ class FraunhoferDashboard:
         self.reset_button = widgets.Button(description="Reset", icon="undo")
         self.add_aperture_button = widgets.Button(
             description="Add opening", icon="plus", button_style="info"
+        )
+        self.add_obstacle_button = widgets.Button(
+            description="Add obstacle", icon="plus", button_style="warning"
         )
         self.extra_view_buttons = {
             key: widgets.ToggleButton(value=False, description=label)
@@ -362,7 +365,7 @@ class FraunhoferDashboard:
             width=config.DASHBOARD_CONTROL_WIDTH,
         )
         aperture_panel = self._card(
-            "SELECTED OPENING", [self.aperture_preview_output]
+            "SELECTED OPENING / OBSTACLE", [self.aperture_preview_output]
         )
         diffraction_panel = self._card(
             "CAMERA / OBSERVATION", [self.diffraction_preview_output]
@@ -523,6 +526,7 @@ class FraunhoferDashboard:
             toggle.observe(self._request_update, names="value")
         self.auto_update.observe(self._auto_update_changed, names="value")
         self.add_aperture_button.on_click(self._add_button_clicked)
+        self.add_obstacle_button.on_click(self._add_obstacle_button_clicked)
         self.refresh_button.on_click(self.render)
         self.reset_button.on_click(self.reset)
 
@@ -530,10 +534,16 @@ class FraunhoferDashboard:
         self,
         kind: str = "slit",
         center_mm: float | None = None,
+        is_obstacle: bool = False,
         render: bool = True,
     ) -> None:
         center_value = (
             config.CENTER_MM.default if center_mm is None else center_mm
+        )
+        role = widgets.Dropdown(
+            options=config.ROLE_OPTIONS,
+            value="obstacle" if is_obstacle else "opening",
+            description="Role",
         )
         shape = widgets.Dropdown(
             options=config.SHAPE_OPTIONS, value=kind, description="Shape"
@@ -562,6 +572,7 @@ class FraunhoferDashboard:
         dimensions = widgets.HBox()
         row_box = widgets.VBox()
         row: dict[str, widgets.Widget] = {
+            "role": role,
             "shape": shape,
             "orientation": orientation,
             "width": width,
@@ -581,7 +592,7 @@ class FraunhoferDashboard:
             else:
                 dimensions.children = (width, height)
             row_box.children = (
-                widgets.HBox([shape, remove]),
+                widgets.HBox([role, shape, remove]),
                 dimensions,
                 widgets.HBox([center_x, center_y]),
             )
@@ -594,6 +605,7 @@ class FraunhoferDashboard:
 
         shape.observe(refresh_dimensions, names="value")
         for control in (
+            role,
             shape,
             orientation,
             width,
@@ -631,7 +643,9 @@ class FraunhoferDashboard:
             self.case_controls.children = (self.circle_radius_box,)
         elif self.case.value == "multiple":
             self.case_controls.children = (
-                self.add_aperture_button,
+                widgets.HBox(
+                    [self.add_aperture_button, self.add_obstacle_button]
+                ),
                 self.aperture_rows_box,
             )
         else:
@@ -700,12 +714,14 @@ class FraunhoferDashboard:
         for row in self.aperture_rows:
             center_x = config.CENTER_MM.to_si(row["center_x"].value)
             center_y = config.CENTER_MM.to_si(row["center_y"].value)
+            is_obstacle = row["role"].value == "obstacle"
             if row["shape"].value == "circle":
                 apertures.append(
                     engine.Aperture.circle(
                         config.CIRCLE_RADIUS_UM.to_si(row["radius"].value),
                         center_x,
                         center_y,
+                        is_obstacle=is_obstacle,
                     )
                 )
                 continue
@@ -722,7 +738,13 @@ class FraunhoferDashboard:
                 else engine.Aperture.rectangle
             )
             apertures.append(
-                constructor(width, height, center_x, center_y)
+                constructor(
+                    width,
+                    height,
+                    center_x,
+                    center_y,
+                    is_obstacle=is_obstacle,
+                )
             )
         return apertures
 
@@ -936,7 +958,7 @@ class FraunhoferDashboard:
                 apertures = self._build_apertures()
                 if not apertures:
                     raise ValueError(
-                        "Add at least one opening in Multiple mode."
+                        "Add at least one opening or obstacle in Multiple mode."
                     )
                 report = engine.evaluate_far_field(
                     apertures,
@@ -1150,4 +1172,7 @@ class FraunhoferDashboard:
             self.render()
 
     def _add_button_clicked(self, button=None) -> None:
-        self._add_aperture_row()
+        self._add_aperture_row(is_obstacle=False)
+
+    def _add_obstacle_button_clicked(self, button=None) -> None:
+        self._add_aperture_row(is_obstacle=True)

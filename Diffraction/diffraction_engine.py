@@ -52,12 +52,15 @@ class ApertureKind(str, Enum):
 
 @dataclass(frozen=True)
 class Aperture:
-    """One axis-aligned aperture primitive.
+    """One axis-aligned aperture or obstacle primitive.
 
     A slit is represented as the finite narrow rectangle used in the source
     PDF, with ``width`` across the slit and ``height`` along it.  Keeping the
     slit finite makes both its two-dimensional pattern and far-field support
     well defined.
+
+    ``is_obstacle`` selects Babinet complementarity: openings contribute
+    ``+A`` and obstacles contribute ``-A`` to the coherent Fourier amplitude.
     """
 
     kind: ApertureKind | str
@@ -66,6 +69,7 @@ class Aperture:
     radius: float | None = None
     center_x: float = 0.0
     center_y: float = 0.0
+    is_obstacle: bool = False
 
     def __post_init__(self) -> None:
         try:
@@ -76,6 +80,7 @@ class Aperture:
                 f"Unknown aperture kind {self.kind!r}; use one of: {choices}."
             ) from exc
         object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "is_obstacle", bool(self.is_obstacle))
 
         if not np.isfinite(self.center_x) or not np.isfinite(self.center_y):
             raise ValueError("Aperture center coordinates must be finite.")
@@ -93,9 +98,18 @@ class Aperture:
         length: float,
         center_x: float = 0.0,
         center_y: float = 0.0,
+        is_obstacle: bool = False,
     ) -> "Aperture":
-        """Create a finite slit of ``width`` by ``length``."""
-        return cls(ApertureKind.SLIT, width, length, None, center_x, center_y)
+        """Create a finite slit opening or opaque obstacle."""
+        return cls(
+            ApertureKind.SLIT,
+            width,
+            length,
+            None,
+            center_x,
+            center_y,
+            is_obstacle,
+        )
 
     @classmethod
     def rectangle(
@@ -104,10 +118,17 @@ class Aperture:
         height: float,
         center_x: float = 0.0,
         center_y: float = 0.0,
+        is_obstacle: bool = False,
     ) -> "Aperture":
-        """Create a rectangular opening."""
+        """Create a rectangular opening or opaque obstacle."""
         return cls(
-            ApertureKind.RECTANGLE, width, height, None, center_x, center_y
+            ApertureKind.RECTANGLE,
+            width,
+            height,
+            None,
+            center_x,
+            center_y,
+            is_obstacle,
         )
 
     @classmethod
@@ -116,18 +137,32 @@ class Aperture:
         radius: float,
         center_x: float = 0.0,
         center_y: float = 0.0,
+        is_obstacle: bool = False,
     ) -> "Aperture":
-        """Create a circular opening."""
-        return cls(ApertureKind.CIRCLE, None, None, radius, center_x, center_y)
+        """Create a circular opening or opaque obstacle."""
+        return cls(
+            ApertureKind.CIRCLE,
+            None,
+            None,
+            radius,
+            center_x,
+            center_y,
+            is_obstacle,
+        )
 
     @property
     def area(self) -> float:
-        """Geometrical area of the opening."""
+        """Geometrical area of the opening or obstacle silhouette."""
         if self.kind == ApertureKind.CIRCLE:
             assert self.radius is not None
             return float(np.pi * self.radius**2)
         assert self.width is not None and self.height is not None
         return float(self.width * self.height)
+
+    @property
+    def signed_area(self) -> float:
+        """Babinet-signed area: openings positive, obstacles negative."""
+        return -self.area if self.is_obstacle else self.area
 
     @property
     def support_radius(self) -> float:
@@ -312,7 +347,12 @@ def aperture_amplitude(
     fy: np.ndarray,
     aperture: Aperture,
 ) -> np.ndarray:
-    """Analytical Fourier amplitude of one aperture primitive."""
+    """Analytical Fourier amplitude of one aperture or obstacle primitive.
+
+    Obstacles use Babinet complementarity: their amplitude is the negative of
+    the same-shaped opening, so coherent mixtures of openings and obstacles
+    interfere with opposite phase.
+    """
     fx_array, fy_array = np.broadcast_arrays(
         np.asarray(fx, dtype=float), np.asarray(fy, dtype=float)
     )
@@ -337,6 +377,9 @@ def aperture_amplitude(
         )
         envelope = aperture.area * airy_amplitude
 
+    if aperture.is_obstacle:
+        envelope = -envelope
+
     shift_phase = np.exp(
         -2j
         * np.pi
@@ -350,7 +393,7 @@ def composite_amplitude(
     fy: np.ndarray,
     apertures: Sequence[Aperture],
 ) -> np.ndarray:
-    """Coherently sum the analytical amplitudes of all openings."""
+    """Coherently sum the analytical amplitudes of all openings and obstacles."""
     items = _aperture_tuple(apertures)
     fx_array, fy_array = np.broadcast_arrays(
         np.asarray(fx, dtype=float), np.asarray(fy, dtype=float)
@@ -402,8 +445,12 @@ def fraunhofer_intensity(
     )
     intensity = np.abs(field) ** 2
     if normalize:
-        on_axis_intensity = sum(aperture.area for aperture in items) ** 2
-        intensity = intensity / on_axis_intensity
+        signed_area = sum(aperture.signed_area for aperture in items)
+        on_axis_intensity = signed_area**2
+        if on_axis_intensity <= 0.0:
+            on_axis_intensity = sum(aperture.area for aperture in items) ** 2
+        if on_axis_intensity > 0.0:
+            intensity = intensity / on_axis_intensity
     return np.asarray(intensity, dtype=float), report
 
 

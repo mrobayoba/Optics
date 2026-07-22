@@ -5,7 +5,8 @@ exercise 20, plus an analytical slit and straight-edge Fresnel simulator for
 exercise 22.
 It supports a finite slit, a rectangular opening, a circular opening, and a
 coherent collection containing independently sized and positioned primitives
-of all three types. Arbitrary custom openings can also be entered as a safe
+of all three types as either **openings** or **obstacles** (Babinet
+complementarity). Arbitrary custom openings can also be entered as a safe
 mathematical expression, Python callable, or binary/grayscale image.
 
 The interactive interfaces are
@@ -89,11 +90,13 @@ A = pi*r^2 * 2*J1(q)/q
 
 with the analytical limit `2*J1(q)/q = 1` at `q = 0`.
 
-For multiple openings, the engine coherently adds the complex amplitudes and
-then computes `I = |sum(A_j)|^2`. The normalized result has on-axis intensity
-one. Components are intended to represent distinct, non-overlapping openings
-under uniform coherent plane-wave illumination; overlapping entries would
-model additive transmittance rather than the union of two cutouts.
+For multiple openings and obstacles, the engine coherently adds the complex
+amplitudes and then computes `I = |sum(A_j)|^2`. Obstacles contribute the
+negative of the same-shaped opening (Babinet complementarity). The normalized
+result has on-axis intensity one when the signed area sum is nonzero.
+Components are intended to represent distinct, non-overlapping shapes under
+uniform coherent plane-wave illumination; overlapping entries would model
+additive transmittance rather than the union of two cutouts.
 
 For a sampled custom transmittance `t(x_tilde, y_tilde)`, the numerical path
 calculates
@@ -197,14 +200,15 @@ Open either notebook, select the repository's Python kernel, and run all
 cells. Both dashboards keep three views together:
 
 - a live source → aperture → observation-plane schematic;
-- a dark aperture-plane preview with all selected openings;
+- an aperture-plane preview with openings (white) and obstacles (dark);
 - a wavelength-colored diffraction camera preview with a physical scale bar.
 
 In the Fraunhofer notebook, use the selector for **Slit**, **Rectangle**,
 **Circle**, **Multiple**,
 or **Custom**. Slits expose width, finite length, and vertical/horizontal
-orientation. Multiple mode can add or remove independently sized and
-positioned slit, rectangle, and circle openings. Custom mode accepts either a
+orientation. Multiple mode can **Add opening** or **Add obstacle** for the
+same slit, rectangle, and circle shapes; each row has a **Role** control so
+you can switch without removing the shape. Custom mode accepts either a
 restricted expression or an uploaded image plus its calibrated physical width
 and height, mask resolution, and FFT padding. The shared **Invert white /
 black** toggle complements the selected expression or image mask.
