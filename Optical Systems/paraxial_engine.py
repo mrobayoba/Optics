@@ -96,6 +96,7 @@ class MatrixFactor:
     label: str
     matrix: Matrix
     description: str = ""
+    style_key: str = ""
 
     def __post_init__(self) -> None:
         label = str(self.label).strip()
@@ -103,6 +104,7 @@ class MatrixFactor:
             raise ValueError("A matrix factor label cannot be empty.")
         object.__setattr__(self, "label", label)
         object.__setattr__(self, "matrix", _readonly_matrix(_matrix(self.matrix)))
+        object.__setattr__(self, "style_key", str(self.style_key or "").strip())
 
 
 @dataclass(frozen=True)
@@ -346,12 +348,19 @@ def principal_planes(
             "T(V'→H')",
             translation_matrix(n_prime, image_offset),
             f"D'={image_offset:.6g} m",
+            style_key="translation",
         ),
-        MatrixFactor("M_VV'", base, "vertex-to-vertex system"),
+        MatrixFactor(
+            "M_VV'",
+            base,
+            "vertex-to-vertex system",
+            style_key="result",
+        ),
         MatrixFactor(
             "T(H→V)",
             translation_matrix(n, object_offset),
             f"D={object_offset:.6g} m",
+            style_key="translation",
         ),
     )
     reduced = cascade(factor.matrix for factor in factors)
@@ -420,12 +429,19 @@ def conjugate_planes(
             "T(H'→image)",
             translation_matrix(n_prime, s_prime),
             f"s'={s_prime:.6g} m",
+            style_key="translation",
         ),
-        MatrixFactor("M_HH'", cardinal.equivalent_matrix, "equivalent system"),
+        MatrixFactor(
+            "M_HH'",
+            cardinal.equivalent_matrix,
+            "equivalent system",
+            style_key="result",
+        ),
         MatrixFactor(
             "T(object→H)",
             translation_matrix(n, s),
             f"s={s:.6g} m",
+            style_key="translation",
         ),
     )
     matrix = cascade(factor.matrix for factor in factors)

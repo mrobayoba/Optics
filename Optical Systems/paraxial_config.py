@@ -33,10 +33,15 @@ __all__ = [
     "MAX_DISPLAY_DECIMALS",
     "MIN_DISPLAY_DECIMALS",
     "FIGURE_SIZE",
+    "FIGURE_WIDTH_MAX",
+    "FIGURE_WIDTH_PER_EXTRA_ELEMENT",
     "SCHEMATIC_RAY_COUNT",
     "COLORS",
+    "FACTOR_CARD_STYLES",
     "DASHBOARD_CSS",
     "length_scale",
+    "figure_size_for_elements",
+    "factor_card_style",
 ]
 
 
@@ -89,20 +94,36 @@ DEFAULT_DISPLAY_DECIMALS = 6
 MIN_DISPLAY_DECIMALS = 0
 MAX_DISPLAY_DECIMALS = 16
 FIGURE_SIZE = (11.0, 5.2)
+FIGURE_WIDTH_MAX = 22.0
+FIGURE_WIDTH_PER_EXTRA_ELEMENT = 0.55
 SCHEMATIC_RAY_COUNT = 5
 
 COLORS = {
     "axis": "#475569",
-    "translation": "#0891b2",
+    "translation": "#16a34a",
     "refraction": "#2563eb",
-    "reflection": "#d97706",
-    "lens": "#0284c7",
+    "reflection": "#ca8a04",
+    "thin_lens": "#c026d3",
+    "thick_lens": "#ffffff",
+    "result": "#334155",
+    # Kept for older schematic call sites; prefer thin_lens / thick_lens.
+    "lens": "#c026d3",
     "principal": "#dc2626",
     "object": "#166534",
     "image": "#9f1239",
     "ray": "#ea580c",
     "virtual_ray": "#94a3b8",
     "panel": "#f8fafc",
+}
+
+# Border + fill for matrix factor cards and element-stack rows.
+FACTOR_CARD_STYLES = {
+    "translation": {"border": "#16a34a", "background": "#dcfce7"},
+    "refraction": {"border": "#2563eb", "background": "#dbeafe"},
+    "reflection": {"border": "#ca8a04", "background": "#fef9c3"},
+    "thin_lens": {"border": "#c026d3", "background": "#fae8ff"},
+    "thick_lens": {"border": "#334155", "background": "#ffffff"},
+    "result": {"border": "#334155", "background": "#f1f5f9"},
 }
 
 # Presets list components in optical / addition order (first acts first on the
@@ -200,6 +221,30 @@ DASHBOARD_CSS = """
   border-radius: 0.25rem;
   margin-left: 0.35rem;
 }
+.paraxial-factor-card {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.18rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 0.35rem;
+  border: 2px solid #334155;
+  background: #f1f5f9;
+  box-sizing: border-box;
+}
+.paraxial-product-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  overflow-x: auto;
+  max-width: 100%;
+  padding-bottom: 0.45rem;
+}
+.paraxial-figure-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
 </style>
 """
 
@@ -211,3 +256,21 @@ def length_scale(unit: str) -> float:
     if unit == "mm":
         return MM_PER_METRE
     raise ValueError(f"Unknown length unit {unit!r}; use 'm' or 'mm'.")
+
+
+def factor_card_style(style_key: str) -> dict[str, str]:
+    """Return border/background colors for a matrix factor card."""
+    key = str(style_key or "result").strip() or "result"
+    return dict(FACTOR_CARD_STYLES.get(key, FACTOR_CARD_STYLES["result"]))
+
+
+def figure_size_for_elements(count: int) -> tuple[float, float]:
+    """Grow the schematic figure when many components would crush labels."""
+    base_w, base_h = FIGURE_SIZE
+    n = max(0, int(count))
+    width = min(
+        FIGURE_WIDTH_MAX,
+        base_w + FIGURE_WIDTH_PER_EXTRA_ELEMENT * max(0, n - 4),
+    )
+    height = base_h + (0.35 if n >= 8 else 0.0)
+    return (float(width), float(height))

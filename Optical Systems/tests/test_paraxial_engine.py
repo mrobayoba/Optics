@@ -12,6 +12,7 @@ OPTICAL_SYSTEMS_DIR = Path(__file__).resolve().parents[1]
 if str(OPTICAL_SYSTEMS_DIR) not in sys.path:
     sys.path.insert(0, str(OPTICAL_SYSTEMS_DIR))
 
+import paraxial_config as config
 import paraxial_engine as engine
 import paraxial_tools as tools
 
@@ -205,6 +206,8 @@ class MatrixOrderTests(unittest.TestCase):
         self.assertEqual(len(thick.matrix_factors()), 1)
         self.assertEqual(thin.matrix_factors()[0].label, "Mtn[L1]")
         self.assertEqual(thick.matrix_factors()[0].label, "Mtk[L2]")
+        self.assertEqual(thin.matrix_factors()[0].style_key, "thin_lens")
+        self.assertEqual(thick.matrix_factors()[0].style_key, "thick_lens")
         np.testing.assert_allclose(
             thin.matrix,
             engine.thin_lens_matrix(5.0, 6.0),
@@ -212,6 +215,42 @@ class MatrixOrderTests(unittest.TestCase):
         np.testing.assert_allclose(
             thick.matrix,
             engine.thick_lens_matrix(1.5, 0.01, 5.0, 6.0),
+        )
+
+    def test_element_style_keys_cover_all_kinds(self):
+        samples = (
+            tools.OpticalElement.translation("T1", 1.0, 0.1),
+            tools.OpticalElement.refraction("Ra1", 1.0, 1.5, 0.1),
+            tools.OpticalElement.reflection("Re1", 1.0, -0.2),
+            tools.OpticalElement.thin_lens("L1", 5.0),
+            tools.OpticalElement.thick_lens("L2", 1.5, 0.01, 5.0, 5.0),
+        )
+        expected = {
+            "translation": "translation",
+            "refraction": "refraction",
+            "reflection": "reflection",
+            "thin_lens": "thin_lens",
+            "thick_lens": "thick_lens",
+        }
+        for element in samples:
+            self.assertEqual(
+                element.matrix_factors()[0].style_key,
+                expected[element.kind.value],
+            )
+
+
+class FigureLayoutTests(unittest.TestCase):
+    def test_figure_grows_with_element_count_then_clamps(self):
+        base = config.figure_size_for_elements(0)
+        wide = config.figure_size_for_elements(9)
+        clamped = config.figure_size_for_elements(40)
+        self.assertEqual(base, config.FIGURE_SIZE)
+        self.assertGreater(wide[0], base[0])
+        self.assertGreaterEqual(wide[1], base[1])
+        self.assertLessEqual(clamped[0], config.FIGURE_WIDTH_MAX)
+        self.assertEqual(
+            config.factor_card_style("thick_lens")["background"],
+            "#ffffff",
         )
 
 

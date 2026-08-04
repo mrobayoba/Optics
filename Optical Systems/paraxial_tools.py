@@ -175,6 +175,7 @@ class OpticalElement:
                     f"T[{self.label}]",
                     matrix,
                     f"n={self.refractive_index:g}, d={self.distance:g} m",
+                    style_key="translation",
                 ),
             )
 
@@ -192,6 +193,7 @@ class OpticalElement:
                         f"P={power:.6g} m⁻¹; nᵢ={self.incident_index:g}, "
                         f"nₜ={self.transmitted_index:g}, R={self.radius:g} m"
                     ),
+                    style_key="refraction",
                 ),
             )
 
@@ -201,6 +203,7 @@ class OpticalElement:
                     f"Re[{self.label}]",
                     engine.reflection_matrix(self.incident_index, self.radius),
                     f"nᵢ={self.incident_index:g}, R={self.radius:g} m",
+                    style_key="reflection",
                 ),
             )
 
@@ -214,6 +217,7 @@ class OpticalElement:
                         f"P={power:.6g} m⁻¹ "
                         f"(P₁={self.first_power:.6g}, P₂={self.second_power:.6g})"
                     ),
+                    style_key="thin_lens",
                 ),
             )
 
@@ -230,6 +234,7 @@ class OpticalElement:
                     f"n={self.lens_index:g}, d={self.distance:g} m, "
                     f"P₁={self.first_power:.6g} m⁻¹, P₂={self.second_power:.6g} m⁻¹"
                 ),
+                style_key="thick_lens",
             ),
         )
 

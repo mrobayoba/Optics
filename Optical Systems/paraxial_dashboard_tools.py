@@ -5,7 +5,6 @@ from __future__ import annotations
 from html import escape
 from typing import Sequence
 
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 
@@ -24,6 +23,7 @@ __all__ = [
 def matrix_html(
     matrix: np.ndarray,
     decimals: int = config.DEFAULT_DISPLAY_DECIMALS,
+    accent: str | None = None,
 ) -> str:
     """Render a 2x2 numeric matrix as a compact HTML table."""
     values = np.asarray(matrix, dtype=float)
@@ -35,6 +35,7 @@ def matrix_html(
             f"decimals must be between {config.MIN_DISPLAY_DECIMALS} and "
             f"{config.MAX_DISPLAY_DECIMALS}."
         )
+    border = accent or "#334155"
     rows = []
     for row in values:
         cells = "".join(
@@ -47,10 +48,33 @@ def matrix_html(
         )
         rows.append(f"<tr>{cells}</tr>")
     return (
-        "<span style='display:inline-block;border-left:2px solid #334155;"
-        "border-right:2px solid #334155;padding:0.08rem 0.15rem;"
+        f"<span style='display:inline-block;border-left:2px solid {escape(border)};"
+        f"border-right:2px solid {escape(border)};padding:0.08rem 0.15rem;"
         "vertical-align:middle'><table style='border-collapse:collapse'>"
         f"{''.join(rows)}</table></span>"
+    )
+
+
+def _factor_card_html(
+    label: str,
+    matrix: np.ndarray,
+    description: str,
+    style_key: str,
+    decimals: int,
+) -> str:
+    style = config.factor_card_style(style_key)
+    border = style["border"]
+    background = style["background"]
+    details = (
+        f"<div style='font-size:0.76rem;color:#475569'>{escape(description)}</div>"
+        if description
+        else ""
+    )
+    return (
+        "<div class='paraxial-factor-card' "
+        f"style='border-color:{escape(border)};background:{escape(background)}'>"
+        f"<strong>{escape(label)}</strong>"
+        f"{matrix_html(matrix, decimals, accent=border)}{details}</div>"
     )
 
 
@@ -63,24 +87,28 @@ def factor_product_html(
     decimals: int = config.DEFAULT_DISPLAY_DECIMALS,
 ) -> str:
     """Render every factor, operator, result, and numeric check in order."""
-    factor_blocks = []
-    for factor in factors:
-        details = (
-            f"<div style='font-size:0.76rem;color:#475569'>{escape(factor.description)}</div>"
-            if factor.description
-            else ""
+    factor_blocks = [
+        _factor_card_html(
+            factor.label,
+            factor.matrix,
+            factor.description,
+            factor.style_key or "result",
+            decimals,
         )
-        factor_blocks.append(
-            "<div style='display:inline-flex;flex-direction:column;"
-            "align-items:center;gap:0.18rem'>"
-            f"<strong>{escape(factor.label)}</strong>"
-            f"{matrix_html(factor.matrix, decimals)}{details}</div>"
-        )
+        for factor in factors
+    ]
     product = (
         "<span style='font-size:1.25rem;padding:0 0.3rem'>×</span>"
     ).join(factor_blocks)
     if not product:
         product = "<em>Identity (empty factor list)</em>"
+    result_block = _factor_card_html(
+        result_label,
+        result,
+        "",
+        "result",
+        decimals,
+    )
     checks_html = "".join(
         f"<span style='margin-right:1rem'><strong>{escape(label)}:</strong> "
         f"{escape(value)}</span>"
@@ -89,14 +117,10 @@ def factor_product_html(
     return (
         "<div class='paraxial-matrix-panel'>"
         f"<h4 style='margin:0 0 0.55rem'>{escape(title)}</h4>"
-        "<div style='display:flex;align-items:center;gap:0.25rem;"
-        "overflow-x:auto;padding-bottom:0.45rem'>"
+        "<div class='paraxial-product-row'>"
         f"{product}"
         "<span style='font-size:1.25rem;padding:0 0.3rem'>=</span>"
-        "<div style='display:inline-flex;flex-direction:column;"
-        "align-items:center;gap:0.18rem'>"
-        f"<strong>{escape(result_label)}</strong>"
-        f"{matrix_html(result, decimals)}</div>"
+        f"{result_block}"
         "</div>"
         f"<div style='font-size:0.84rem;color:#334155'>{checks_html}</div>"
         "</div>"
@@ -151,6 +175,21 @@ def _draw_arrow(
     )
 
 
+def _element_plot_color(kind: tools.ElementKind) -> tuple[str, str, float]:
+    """Return (line color, edge/text color, line width) for a schematic element."""
+    colors = config.COLORS
+    if kind == tools.ElementKind.TRANSLATION:
+        return colors["translation"], colors["translation"], 3.0
+    if kind == tools.ElementKind.REFLECTION:
+        return colors["reflection"], colors["reflection"], 2.0
+    if kind == tools.ElementKind.THIN_LENS:
+        return colors["thin_lens"], colors["thin_lens"], 2.0
+    if kind == tools.ElementKind.THICK_LENS:
+        # White fill needs a dark stroke so it stays visible on the plot.
+        return colors["thick_lens"], colors["result"], 2.2
+    return colors["refraction"], colors["refraction"], 2.0
+
+
 def draw_optical_schematic(
     ax: Axes,
     elements: Sequence[tools.OpticalElement],
@@ -172,6 +211,7 @@ def draw_optical_schematic(
 
     geometry = tools.system_geometry(elements)
     colors = config.COLORS
+    label_size = 7 if len(elements) >= 8 else 8
 
     coordinates = [geometry.start_vertex, geometry.finish_vertex]
     h_position = None
@@ -213,30 +253,55 @@ def draw_optical_schematic(
                 alpha=0.45,
             )
             continue
-        if placement.kind == tools.ElementKind.REFLECTION:
-            color = colors["reflection"]
-            linestyle = "-."
-        elif placement.kind in (
-            tools.ElementKind.THIN_LENS,
-            tools.ElementKind.THICK_LENS,
-        ):
-            color = colors["lens"]
-            linestyle = "-"
+        fill, stroke, width = _element_plot_color(placement.kind)
+        linestyle = "-." if placement.kind == tools.ElementKind.REFLECTION else "-"
+        if placement.kind == tools.ElementKind.THICK_LENS:
+            ax.axvline(
+                _x(placement.start),
+                color=stroke,
+                lw=width,
+                ls=linestyle,
+                alpha=0.95,
+            )
+            if placement.finish != placement.start:
+                ax.axvline(
+                    _x(placement.finish),
+                    color=stroke,
+                    lw=width,
+                    alpha=0.95,
+                )
+            # Light fill marker so white thick lenses remain distinct.
+            mid = _x((placement.start + placement.finish) / 2.0)
+            ax.plot(
+                [mid],
+                [0.0],
+                marker="s",
+                markersize=7,
+                markerfacecolor=fill,
+                markeredgecolor=stroke,
+                markeredgewidth=1.2,
+                linestyle="None",
+                zorder=5,
+            )
         else:
-            color = colors["refraction"]
-            linestyle = "-"
-        ax.axvline(_x(placement.start), color=color, lw=2.0, ls=linestyle, alpha=0.9)
-        if placement.finish != placement.start:
-            ax.axvline(_x(placement.finish), color=color, lw=2.0, alpha=0.9)
+            ax.axvline(
+                _x(placement.start),
+                color=fill,
+                lw=width,
+                ls=linestyle,
+                alpha=0.9,
+            )
+            if placement.finish != placement.start:
+                ax.axvline(_x(placement.finish), color=fill, lw=width, alpha=0.9)
         ax.text(
             _x((placement.start + placement.finish) / 2.0),
             0.02,
             placement.label,
-            color=color,
+            color=stroke if placement.kind == tools.ElementKind.THICK_LENS else fill,
             ha="center",
             va="bottom",
             transform=ax.get_xaxis_transform(),
-            fontsize=8,
+            fontsize=label_size,
         )
 
     ax.axvline(_x(geometry.start_vertex), color=colors["axis"], lw=1.0, ls=":")

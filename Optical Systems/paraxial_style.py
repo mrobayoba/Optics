@@ -89,6 +89,7 @@ class ParaxialDashboard:
                 factor.label,
                 self._scale_matrix(factor.matrix),
                 factor.description,
+                style_key=factor.style_key,
             )
             for factor in factors
         )
@@ -247,6 +248,17 @@ class ParaxialDashboard:
             icon="plus",
             button_style="success",
         )
+        self.new_element_kind_footer = widgets.Dropdown(
+            options=config.ELEMENT_OPTIONS,
+            value=config.DEFAULT_ELEMENT_KIND,
+            description="Add",
+            style={"description_width": "initial"},
+        )
+        self.add_element_button_footer = widgets.Button(
+            description="Add matrix",
+            icon="plus",
+            button_style="success",
+        )
         self.refresh_button = widgets.Button(
             description="Recalculate",
             icon="refresh",
@@ -317,7 +329,9 @@ class ParaxialDashboard:
         self.principal_matrix = widgets.HTML()
         self.conjugate_values = widgets.HTML()
         self.conjugate_matrix = widgets.HTML()
-        self.figure_output = widgets.Output()
+        self.figure_output = widgets.Output(
+            layout=widgets.Layout(width="100%", overflow_x="auto")
+        )
 
     def _create_layout(self) -> None:
         title = widgets.HTML(
@@ -345,6 +359,13 @@ class ParaxialDashboard:
                 self.add_element_button,
                 self.unit_toggle,
                 self.unit_badge,
+            ],
+            layout=widgets.Layout(flex_flow="row wrap", gap="0.5rem", align_items="center"),
+        )
+        builder_footer = widgets.HBox(
+            [
+                self.new_element_kind_footer,
+                self.add_element_button_footer,
             ],
             layout=widgets.Layout(flex_flow="row wrap", gap="0.5rem", align_items="center"),
         )
@@ -381,6 +402,7 @@ class ParaxialDashboard:
                 builder_toolbar,
                 widgets.HTML("<h3>Element stack: V → V′</h3>"),
                 self.element_box,
+                builder_footer,
                 widgets.HTML("<h3>Analysis controls</h3>"),
                 analysis_controls,
                 self.status,
@@ -394,8 +416,14 @@ class ParaxialDashboard:
             lambda _: self._load_preset(self.preset.value, refresh=True)
         )
         self.add_element_button.on_click(lambda _: self._add_default_element())
+        self.add_element_button_footer.on_click(lambda _: self._add_default_element())
         self.refresh_button.on_click(lambda _: self.refresh())
         self.unit_toggle.on_click(self._toggle_length_unit)
+        self.new_element_kind.observe(self._sync_add_kind_from_top, names="value")
+        self.new_element_kind_footer.observe(
+            self._sync_add_kind_from_footer,
+            names="value",
+        )
         for control in (
             self.input_index,
             self.output_index,
@@ -560,7 +588,7 @@ class ParaxialDashboard:
                 widgets.VBox(list(parameter_boxes.values())),
             ],
             layout=widgets.Layout(
-                border="1px solid #cbd5e1",
+                border="2px solid #cbd5e1",
                 padding="0.45rem",
                 margin="0 0 0.35rem 0",
             ),
@@ -577,6 +605,7 @@ class ParaxialDashboard:
             "remove": remove,
             "container": container,
         }
+        self._apply_row_accent(row)
 
         kind.observe(lambda change: self._on_kind_change(row, change), names="value")
         label.observe(self._on_value_change, names="value")
@@ -585,6 +614,13 @@ class ParaxialDashboard:
         remove.on_click(lambda _: self._remove_row(row))
         self._refresh_parameter_visibility(row)
         return row
+
+    @staticmethod
+    def _apply_row_accent(row: dict[str, Any]) -> None:
+        """Tint the element-stack row to match its matrix type color."""
+        style = config.factor_card_style(row["kind"].value)
+        row["container"].layout.border = f"2px solid {style['border']}"
+        row["container"].layout.background_color = style["background"]
 
     def _power_calculator_controls(
         self,
@@ -660,7 +696,7 @@ class ParaxialDashboard:
                 )
             )
 
-        def _apply(_button: widgets.Button = button) -> None:
+        def _apply(_button: widgets.Button = button, *, notify: bool = True) -> bool:
             _sync_lens_index()
             if not _relation_holds():
                 status.value = (
@@ -668,7 +704,7 @@ class ParaxialDashboard:
                     f"Lens error: {relation} is required for this surface."
                     "</span>"
                 )
-                return
+                return False
             try:
                 power_si = engine.interface_power(
                     incident.value,
@@ -679,7 +715,7 @@ class ParaxialDashboard:
                 status.value = (
                     f"<span style='color:#991b1b;font-size:0.8rem'>{exc}</span>"
                 )
-                return
+                return False
             power_display = self._from_si_power(power_si)
             exact = self._assign_control_value(power_field, power_display)
             unit = self._power_unit_label()
@@ -689,11 +725,13 @@ class ParaxialDashboard:
                 f"{radius.value:g}={exact:.{self._display_digits()}f} {unit} "
                 f"({relation})</span>"
             )
-            self._on_value_change()
+            if notify:
+                self._on_value_change()
+            return True
 
         lens_index_field.observe(_sync_lens_index, names="value")
         _sync_lens_index()
-        button.on_click(_apply)
+        button.on_click(lambda _btn: _apply(notify=True))
         box = widgets.HBox(
             [power_field, incident, transmitted, radius, button, status],
             layout=widgets.Layout(
@@ -702,12 +740,13 @@ class ParaxialDashboard:
                 align_items="center",
             ),
         )
-        # Expose calculator widgets for lens validation.
+        # Expose calculator widgets for lens validation and Recalculate sync.
         box._paraxial_surface = surface  # type: ignore[attr-defined]
         box._paraxial_incident = incident  # type: ignore[attr-defined]
         box._paraxial_transmitted = transmitted  # type: ignore[attr-defined]
         box._paraxial_linked = linked  # type: ignore[attr-defined]
         box._paraxial_relation_holds = _relation_holds  # type: ignore[attr-defined]
+        box._paraxial_apply_power = lambda: _apply(notify=False)  # type: ignore[attr-defined]
         return box
 
     def _validate_lens_row(self, row: dict[str, Any]) -> None:
@@ -755,8 +794,32 @@ class ParaxialDashboard:
         row: dict[str, Any],
         _change: dict[str, Any],
     ) -> None:
+        self._apply_row_accent(row)
         self._refresh_parameter_visibility(row)
         self._on_value_change()
+
+    def _sync_add_kind_from_top(self, change: dict[str, Any]) -> None:
+        if self.new_element_kind_footer.value != change["new"]:
+            self.new_element_kind_footer.value = change["new"]
+
+    def _sync_add_kind_from_footer(self, change: dict[str, Any]) -> None:
+        if self.new_element_kind.value != change["new"]:
+            self.new_element_kind.value = change["new"]
+
+    def _sync_lens_powers_from_calculators(self) -> None:
+        """Rewrite P₁/P₂ from each lens Calc-P inputs before matrix rebuild."""
+        for row in self.element_rows:
+            kind = row["kind"].value
+            if kind not in {
+                tools.ElementKind.THIN_LENS.value,
+                tools.ElementKind.THICK_LENS.value,
+            }:
+                continue
+            helpers = row["power_helpers"]
+            for key in ("first_power", "second_power"):
+                apply = getattr(helpers[key], "_paraxial_apply_power", None)
+                if callable(apply):
+                    apply()
 
     def _on_value_change(self, _change: object = None) -> None:
         if (
@@ -1133,7 +1196,9 @@ class ParaxialDashboard:
             )
         with self.figure_output:
             self.figure_output.clear_output(wait=True)
-            fig, ax = plt.subplots(figsize=config.FIGURE_SIZE)
+            fig, ax = plt.subplots(
+                figsize=config.figure_size_for_elements(len(elements))
+            )
             visuals.draw_optical_schematic(
                 ax,
                 elements,
@@ -1155,6 +1220,7 @@ class ParaxialDashboard:
         self._rendering = True
         try:
             self._set_status()
+            self._sync_lens_powers_from_calculators()
             elements = []
             for row in self.element_rows:
                 self._validate_lens_row(row)
