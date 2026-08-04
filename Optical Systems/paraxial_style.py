@@ -211,6 +211,7 @@ class ParaxialDashboard:
             self._update_unit_chrome()
         finally:
             self._suspend_updates = False
+        self._sync_vertex_distance_label()
         self.refresh()
 
     def _assign_control_value(
@@ -291,13 +292,23 @@ class ParaxialDashboard:
             "Output n′",
             ambient_default,
         )
-        self.object_distance = self._length_control(
-            config.OBJECT_DISTANCE_M,
-            "Object s",
+        self.conjugate_mode = widgets.Dropdown(
+            options=config.CONJUGATE_MODE_OPTIONS,
+            value=config.DEFAULT_CONJUGATE_MODE,
+            description="Known distance",
+            style={"description_width": "initial"},
+            tooltip=(
+                "Enter Object→V (x) or V′→image (x′). "
+                "s and s′ follow from D, D′ on M_VV′ and the imaging equation."
+            ),
+        )
+        self.vertex_distance = self._length_control(
+            config.VERTEX_DISTANCE_M,
+            "Object→V",
         )
         self.object_height = self._length_control(
             config.OBJECT_HEIGHT_M,
-            "Object x",
+            "Object height",
         )
         self.ray_half_angle = self._numeric(
             config.RAY_ANGLE,
@@ -320,7 +331,35 @@ class ParaxialDashboard:
             style={"description_width": "initial"},
             tooltip="Display precision for matrices and reported values (0 to 16).",
         )
+        self.zoom_scale = widgets.FloatSlider(
+            value=config.ZOOM_SCALE.default,
+            min=config.ZOOM_SCALE.minimum,
+            max=config.ZOOM_SCALE.maximum,
+            step=config.ZOOM_SCALE.step,
+            description="Zoom",
+            readout=True,
+            continuous_update=False,
+            style={"description_width": "initial"},
+            layout=widgets.Layout(width="16rem"),
+        )
+        self.zoom_pan = widgets.FloatSlider(
+            value=config.ZOOM_PAN.default,
+            min=config.ZOOM_PAN.minimum,
+            max=config.ZOOM_PAN.maximum,
+            step=config.ZOOM_PAN.step,
+            description="Pan",
+            readout=True,
+            continuous_update=False,
+            style={"description_width": "initial"},
+            layout=widgets.Layout(width="16rem"),
+        )
+        self.zoom_reset_button = widgets.Button(
+            description="Reset view",
+            icon="search-minus",
+            tooltip="Reset schematic zoom and pan to the full system",
+        )
         self._update_unit_chrome()
+        self._sync_vertex_distance_label()
 
     def _create_outputs(self) -> None:
         self.status = widgets.HTML()
@@ -347,7 +386,10 @@ class ParaxialDashboard:
             commute. Use the unit toggle for the whole window: lengths and
             powers stay consistent, while the engine always works in SI metres.
             Input fields are unbounded so calculated and typed values are kept
-            exactly (no clipping to a control range).
+            exactly (no clipping to a control range). Conjugate analysis uses a
+            known <strong>Object→V</strong> or <strong>V′→image</strong> distance;
+            <code>s</code> and <code>s′</code> follow from <code>D</code>,
+            <code>D′</code> on <code>M<sub>VV′</sub></code>.
             </p>
             """
         )
@@ -373,7 +415,8 @@ class ParaxialDashboard:
             [
                 self.input_index,
                 self.output_index,
-                self.object_distance,
+                self.conjugate_mode,
+                self.vertex_distance,
                 self.object_height,
                 self.ray_half_angle,
                 self.ray_count,
@@ -382,6 +425,14 @@ class ParaxialDashboard:
                 self.refresh_button,
             ],
             layout=widgets.Layout(flex_flow="row wrap", gap="0.5rem"),
+        )
+        zoom_controls = widgets.HBox(
+            [
+                self.zoom_scale,
+                self.zoom_pan,
+                self.zoom_reset_button,
+            ],
+            layout=widgets.Layout(flex_flow="row wrap", gap="0.5rem", align_items="center"),
         )
         matrices = widgets.VBox(
             [
@@ -393,7 +444,11 @@ class ParaxialDashboard:
             ],
             layout=widgets.Layout(gap="0.75rem"),
         )
-        tabs = widgets.Tab(children=[matrices, self.figure_output])
+        schematic_tab = widgets.VBox(
+            [zoom_controls, self.figure_output],
+            layout=widgets.Layout(gap="0.45rem", width="100%"),
+        )
+        tabs = widgets.Tab(children=[matrices, schematic_tab])
         tabs.set_title(0, "Matrix resolution")
         tabs.set_title(1, "Optical schematic")
         self.root = widgets.VBox(
@@ -424,14 +479,44 @@ class ParaxialDashboard:
             self._sync_add_kind_from_footer,
             names="value",
         )
+        self.conjugate_mode.observe(self._on_conjugate_mode_change, names="value")
+        self.zoom_reset_button.on_click(lambda _: self._reset_zoom_view())
         for control in (
             self.input_index,
             self.output_index,
             self.ray_half_angle,
             self.ray_count,
             self.display_decimals,
+            self.zoom_scale,
+            self.zoom_pan,
         ):
             control.observe(self._on_value_change, names="value")
+
+    def _sync_vertex_distance_label(self) -> None:
+        unit = self._length_unit_label()
+        if self.conjugate_mode.value == "v_prime_to_image":
+            base = "V′→image"
+        else:
+            base = "Object→V"
+        # Update registered length-control description base so unit toggles stay correct.
+        for index, (control, registered) in enumerate(self._length_controls):
+            if control is self.vertex_distance:
+                self._length_controls[index] = (control, base)
+                break
+        self.vertex_distance.description = f"{base} ({unit})"
+
+    def _on_conjugate_mode_change(self, _change: object = None) -> None:
+        self._sync_vertex_distance_label()
+        self._on_value_change()
+
+    def _reset_zoom_view(self) -> None:
+        self._suspend_updates = True
+        try:
+            self.zoom_scale.value = config.ZOOM_SCALE.default
+            self.zoom_pan.value = config.ZOOM_PAN.default
+        finally:
+            self._suspend_updates = False
+        self._on_value_change()
 
     def _row_numeric(
         self,
@@ -877,7 +962,7 @@ class ParaxialDashboard:
             for row in self.element_rows:
                 self._forget_row_unit_controls(row)
             # Keep analysis length controls; rebuild only stack-linked ones.
-            analysis_ids = {id(self.object_distance), id(self.object_height)}
+            analysis_ids = {id(self.vertex_distance), id(self.object_height)}
             self._length_controls = [
                 item for item in self._length_controls if id(item[0]) in analysis_ids
             ]
@@ -1088,16 +1173,49 @@ class ParaxialDashboard:
             decimals=digits,
         )
 
-    def _render_conjugate(self, result: engine.ConjugateReport) -> None:
+    def _render_conjugate(
+        self,
+        result: engine.ConjugateReport,
+        cardinal: engine.CardinalPoints,
+    ) -> None:
         image_kind = "real" if result.is_real else "virtual"
         orientation = "erect" if result.is_erect else "inverted"
         length = self._length_unit_label()
+        power = self._power_unit_label()
         digits = self._display_digits()
+        p_check = engine.gaussian_power(
+            result.object_distance,
+            result.image_distance,
+            self.input_index.value,
+            self.output_index.value,
+        )
+        mode_label = (
+            "Object→V"
+            if self.conjugate_mode.value == "object_to_v"
+            else "V′→image"
+        )
         self.conjugate_values.value = visuals.values_html(
             "3. Conjugate-plane values",
             (
+                ("Known", mode_label),
                 (
-                    "Object s",
+                    "Object→V (x)",
+                    _quantity(
+                        self._from_si_length(result.object_to_vertex),
+                        length,
+                        digits,
+                    ),
+                ),
+                (
+                    "V′→image (x′)",
+                    _quantity(
+                        self._from_si_length(result.exit_vertex_to_image),
+                        length,
+                        digits,
+                    ),
+                ),
+                (
+                    "Object s (from H)",
                     _quantity(
                         self._from_si_length(result.object_distance),
                         length,
@@ -1105,12 +1223,24 @@ class ParaxialDashboard:
                     ),
                 ),
                 (
-                    "Image s′",
+                    "Image s′ (from H′)",
                     _quantity(
                         self._from_si_length(result.image_distance),
                         length,
                         digits,
                     ),
+                ),
+                (
+                    "P (from M_VV′)",
+                    _quantity(
+                        self._from_si_power(cardinal.power),
+                        power,
+                        digits,
+                    ),
+                ),
+                (
+                    "P check n′/s′+n/s",
+                    _quantity(self._from_si_power(p_check), power, digits),
                 ),
                 (
                     "Lateral mₓ",
@@ -1129,7 +1259,10 @@ class ParaxialDashboard:
                     f"{image_kind}, {orientation}, {result.size_classification}",
                 ),
             ),
-            self._unit_note(),
+            (
+                f"s = x − D and s′ = x′ − D′ with D, D′ from M_VV′. "
+                f"{self._unit_note()}"
+            ),
         )
         self.conjugate_matrix.value = visuals.factor_product_html(
             "Conjugate object → image matrix",
@@ -1209,6 +1342,11 @@ class ParaxialDashboard:
                 length_scale=self._length_scale(),
                 length_unit=self._length_unit_label(),
             )
+            visuals.apply_axis_window(
+                ax,
+                zoom=float(self.zoom_scale.value),
+                pan=float(self.zoom_pan.value),
+            )
             fig.tight_layout()
             display(fig)
             plt.close(fig)
@@ -1243,14 +1381,15 @@ class ParaxialDashboard:
 
             if cardinal is not None:
                 try:
-                    conjugate = engine.conjugate_planes(
+                    conjugate = engine.conjugate_from_vertex_distance(
                         cardinal,
-                        self._to_si_length(self.object_distance.value),
+                        self.conjugate_mode.value,
+                        self._to_si_length(self.vertex_distance.value),
                         self.input_index.value,
                         self.output_index.value,
                         config.MATRIX_TOLERANCE,
                     )
-                    self._render_conjugate(conjugate)
+                    self._render_conjugate(conjugate, cardinal)
                 except (engine.ConjugateAtInfinityError, ValueError) as exc:
                     self._clear_conjugate(str(exc))
 

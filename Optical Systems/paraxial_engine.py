@@ -37,8 +37,15 @@ __all__ = [
     "system_report",
     "assert_unit_determinant",
     "principal_planes",
+    "object_distance_from_vertex",
+    "vertex_from_object_distance",
+    "image_distance_from_exit_vertex",
+    "exit_vertex_from_image_distance",
     "solve_image_distance",
+    "solve_object_distance",
+    "gaussian_power",
     "conjugate_planes",
+    "conjugate_from_vertex_distance",
 ]
 
 Matrix = np.ndarray
@@ -170,6 +177,8 @@ class ConjugateReport:
     is_real: bool
     is_erect: bool
     size_classification: str
+    object_to_vertex: float = 0.0
+    exit_vertex_to_image: float = 0.0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "matrix", _readonly_matrix(_matrix(self.matrix)))
@@ -178,6 +187,7 @@ class ConjugateReport:
     @property
     def product_expression(self) -> str:
         return " @ ".join(factor.label for factor in self.factors)
+
 
 ## Optical System Functions
 def interface_power(
@@ -379,6 +389,46 @@ def principal_planes(
     )
 
 
+def object_distance_from_vertex(
+    object_to_vertex: float,
+    object_principal_offset: float,
+) -> float:
+    """Convert Object→V distance ``x`` into object distance ``s = x - D``."""
+    x = _finite(object_to_vertex, "object_to_vertex")
+    d = _finite(object_principal_offset, "object_principal_offset")
+    return x - d
+
+
+def vertex_from_object_distance(
+    object_distance: float,
+    object_principal_offset: float,
+) -> float:
+    """Convert object distance ``s`` into Object→V distance ``x = s + D``."""
+    s = _finite(object_distance, "object_distance")
+    d = _finite(object_principal_offset, "object_principal_offset")
+    return s + d
+
+
+def image_distance_from_exit_vertex(
+    exit_vertex_to_image: float,
+    image_principal_offset: float,
+) -> float:
+    """Convert V′→image distance ``x'`` into image distance ``s' = x' - D'``."""
+    x_prime = _finite(exit_vertex_to_image, "exit_vertex_to_image")
+    d_prime = _finite(image_principal_offset, "image_principal_offset")
+    return x_prime - d_prime
+
+
+def exit_vertex_from_image_distance(
+    image_distance: float,
+    image_principal_offset: float,
+) -> float:
+    """Convert image distance ``s'`` into V′→image distance ``x' = s' + D'``."""
+    s_prime = _finite(image_distance, "image_distance")
+    d_prime = _finite(image_principal_offset, "image_principal_offset")
+    return s_prime + d_prime
+
+
 def solve_image_distance(
     power: float,
     object_distance: float,
@@ -399,30 +449,52 @@ def solve_image_distance(
     return n_prime / denominator
 
 
-def conjugate_planes(
-    cardinal: CardinalPoints,
-    object_distance: float,
+def solve_object_distance(
+    power: float,
+    image_distance: float,
     input_index: float = 1.0,
     output_index: float = 1.0,
     tolerance: float = DEFAULT_TOLERANCE,
-) -> ConjugateReport:
-    """Resolve the object/image conjugate transfer around ``M_HH'``.
-
-    In the course matrix convention the resolved operator is displayed as
-    ``T(H'→image) @ M_HH' @ T(object→H)``.  With the Gaussian image
-    distance this makes ``M21 = 0`` and ``M22`` the lateral magnification
-    quoted in the source notes.
-    """
-    s = _nonzero(object_distance, "object_distance")
+) -> float:
+    """Solve ``n'/s' + n/s = P`` for the object distance."""
+    p = _finite(power, "power")
+    s_prime = _nonzero(image_distance, "image_distance")
     n = _positive(input_index, "input_index")
     n_prime = _positive(output_index, "output_index")
-    s_prime = solve_image_distance(
-        cardinal.power,
-        s,
-        n,
-        n_prime,
-        tolerance,
-    )
+    denominator = p - n_prime / s_prime
+    if np.isclose(denominator, 0.0, rtol=tolerance, atol=tolerance):
+        raise ConjugateAtInfinityError(
+            "The image lies at the back focal plane; its conjugate object is at infinity."
+        )
+    return n / denominator
+
+
+def gaussian_power(
+    object_distance: float,
+    image_distance: float,
+    input_index: float = 1.0,
+    output_index: float = 1.0,
+) -> float:
+    """Return ``n'/s' + n/s`` for a conjugate pair."""
+    s = _nonzero(object_distance, "object_distance")
+    s_prime = _nonzero(image_distance, "image_distance")
+    n = _positive(input_index, "input_index")
+    n_prime = _positive(output_index, "output_index")
+    return n_prime / s_prime + n / s
+
+
+def _build_conjugate_report(
+    cardinal: CardinalPoints,
+    object_distance: float,
+    image_distance: float,
+    input_index: float,
+    output_index: float,
+    tolerance: float,
+) -> ConjugateReport:
+    s = _nonzero(object_distance, "object_distance")
+    s_prime = _nonzero(image_distance, "image_distance")
+    n = _positive(input_index, "input_index")
+    n_prime = _positive(output_index, "output_index")
 
     factors = (
         MatrixFactor(
@@ -457,6 +529,15 @@ def conjugate_planes(
     else:
         size = "reduced"
 
+    object_to_vertex = vertex_from_object_distance(
+        s,
+        cardinal.object_principal_offset,
+    )
+    exit_vertex_to_image = exit_vertex_from_image_distance(
+        s_prime,
+        cardinal.image_principal_offset,
+    )
+
     return ConjugateReport(
         object_distance=s,
         image_distance=s_prime,
@@ -470,5 +551,93 @@ def conjugate_planes(
         is_real=s_prime > 0.0,
         is_erect=lateral > 0.0,
         size_classification=size,
+        object_to_vertex=object_to_vertex,
+        exit_vertex_to_image=exit_vertex_to_image,
+    )
+
+
+def conjugate_planes(
+    cardinal: CardinalPoints,
+    object_distance: float,
+    input_index: float = 1.0,
+    output_index: float = 1.0,
+    tolerance: float = DEFAULT_TOLERANCE,
+) -> ConjugateReport:
+    """Resolve the object/image conjugate transfer around ``M_HH'``.
+
+    In the course matrix convention the resolved operator is displayed as
+    ``T(H'→image) @ M_HH' @ T(object→H)``.  With the Gaussian image
+    distance this makes ``M21 = 0`` and ``M22`` the lateral magnification
+    quoted in the source notes.  Distances ``s`` and ``s'`` are measured from
+    the principal planes; Object→V and V′→image follow ``x = s + D`` and
+    ``x' = s' + D'``.
+    """
+    s = _nonzero(object_distance, "object_distance")
+    n = _positive(input_index, "input_index")
+    n_prime = _positive(output_index, "output_index")
+    s_prime = solve_image_distance(
+        cardinal.power,
+        s,
+        n,
+        n_prime,
+        tolerance,
+    )
+    return _build_conjugate_report(
+        cardinal,
+        s,
+        s_prime,
+        n,
+        n_prime,
+        tolerance,
+    )
+
+
+def conjugate_from_vertex_distance(
+    cardinal: CardinalPoints,
+    mode: str,
+    distance: float,
+    input_index: float = 1.0,
+    output_index: float = 1.0,
+    tolerance: float = DEFAULT_TOLERANCE,
+) -> ConjugateReport:
+    """Resolve conjugates from Object→V (``x``) or V′→image (``x'``).
+
+    Modes:
+    - ``object_to_v``: known ``x``, ``s = x - D``, then solve ``s'``.
+    - ``v_prime_to_image``: known ``x'``, ``s' = x' - D'``, then solve ``s``.
+    """
+    key = str(mode).strip().lower()
+    n = _positive(input_index, "input_index")
+    n_prime = _positive(output_index, "output_index")
+    value = _finite(distance, "distance")
+
+    if key == "object_to_v":
+        s = object_distance_from_vertex(value, cardinal.object_principal_offset)
+        return conjugate_planes(cardinal, s, n, n_prime, tolerance)
+
+    if key == "v_prime_to_image":
+        s_prime = image_distance_from_exit_vertex(
+            value,
+            cardinal.image_principal_offset,
+        )
+        s = solve_object_distance(
+            cardinal.power,
+            s_prime,
+            n,
+            n_prime,
+            tolerance,
+        )
+        return _build_conjugate_report(
+            cardinal,
+            s,
+            s_prime,
+            n,
+            n_prime,
+            tolerance,
+        )
+
+    raise ValueError(
+        "mode must be 'object_to_v' or 'v_prime_to_image', "
+        f"got {mode!r}."
     )
 ## End of Plane Reduction Functions

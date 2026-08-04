@@ -111,14 +111,22 @@ reported as such rather than divided by zero.
 
 ### 3. Conjugate planes
 
-Given an object distance `s` measured from `H`, the image distance is solved
-from
+Lab measurements usually give Object→V (`x`) or V′→image (`x′`), not the
+principal-plane distances. With `D` and `D′` from `M_VV′`:
+
+```text
+s  = x  - D
+s' = x' - D'
+```
+
+The dashboard accepts either known distance and solves the other side from
 
 ```text
 n'/s' + n/s = P
 ```
 
-The displayed transfer is
+where `P = -M12` comes from the principal-plane reduction. The displayed
+transfer is still
 
 ```text
 M_oi = T(H'→image) @ M_HH' @ T(object→H)
@@ -130,6 +138,7 @@ For conjugate planes, `M21 = 0`. The report shows:
 m_x     = M22 = -n*s'/(n'*s)
 m_alpha = M11*n/n' = -s/s'
 m_x * m_alpha * n'/n = 1
+P_check = n'/s' + n/s   (should match P)
 ```
 
 The sign of `s'` classifies real/virtual images, the sign of `m_x` classifies
@@ -173,7 +182,8 @@ Open `Optical Systems/paraxial_simulator.ipynb`, run all cells, then:
 2. reorder components with the arrow buttons;
 3. inspect the elemental product and `M_VV'`;
 4. inspect the principal-plane reduction and values;
-5. select `s` and inspect the conjugate matrix, magnifications, and schematic.
+5. choose Object→V (`x`) or V′→image (`x′`) and inspect conjugates, magnifications,
+   and the zoomable schematic.
 
 Plain Python example:
 
@@ -187,7 +197,11 @@ elements = [
 ]
 base = tools.build_system(elements)
 cardinal = engine.principal_planes(base.matrix)
-image = engine.conjugate_planes(cardinal, object_distance=0.2)
+image = engine.conjugate_from_vertex_distance(
+    cardinal,
+    mode="object_to_v",
+    distance=0.2,
+)
 ```
 
 ## Tests

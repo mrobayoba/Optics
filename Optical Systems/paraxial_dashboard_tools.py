@@ -17,6 +17,7 @@ __all__ = [
     "factor_product_html",
     "values_html",
     "draw_optical_schematic",
+    "apply_axis_window",
 ]
 
 
@@ -149,6 +150,20 @@ def values_html(
         "<div style='display:flex;flex-wrap:wrap;gap:0.65rem 1rem'>"
         f"{items}</div>{note_html}"
     )
+
+
+def apply_axis_window(
+    ax: Axes,
+    zoom: float = 1.0,
+    pan: float = 0.0,
+) -> Axes:
+    """Crop the current axes limits using zoom/pan without redrawing artists."""
+    x_min, x_max = ax.get_xlim()
+    y_min, y_max = ax.get_ylim()
+    xlim, ylim = config.zoom_window(x_min, x_max, y_min, y_max, zoom, pan)
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    return ax
 
 
 def _draw_arrow(

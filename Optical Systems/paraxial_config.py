@@ -22,6 +22,11 @@ __all__ = [
     "SURFACE_POWER",
     "OBJECT_DISTANCE_M",
     "OBJECT_HEIGHT_M",
+    "VERTEX_DISTANCE_M",
+    "CONJUGATE_MODE_OPTIONS",
+    "DEFAULT_CONJUGATE_MODE",
+    "ZOOM_SCALE",
+    "ZOOM_PAN",
     "RAY_ANGLE",
     "RAY_COUNT",
     "DEFAULT_ELEMENT_KIND",
@@ -42,6 +47,7 @@ __all__ = [
     "length_scale",
     "figure_size_for_elements",
     "factor_card_style",
+    "zoom_window",
 ]
 
 
@@ -82,6 +88,14 @@ RADIUS_M = NumericControl(-1000.0, 1000.0, 1.0e-12, 0.10)
 SURFACE_POWER = NumericControl(-1.0e6, 1.0e6, 1.0e-12, 5.0)
 OBJECT_DISTANCE_M = NumericControl(-100.0, 100.0, 1.0e-12, 0.20)
 OBJECT_HEIGHT_M = NumericControl(-10.0, 10.0, 1.0e-12, 0.02)
+VERTEX_DISTANCE_M = NumericControl(-100.0, 100.0, 1.0e-12, 0.20)
+CONJUGATE_MODE_OPTIONS = (
+    ("Object → V (x)", "object_to_v"),
+    ("V′ → image (x′)", "v_prime_to_image"),
+)
+DEFAULT_CONJUGATE_MODE = "object_to_v"
+ZOOM_SCALE = NumericControl(1.0, 8.0, 0.1, 1.0)
+ZOOM_PAN = NumericControl(-1.0, 1.0, 0.01, 0.0)
 RAY_ANGLE = NumericControl(-0.5, 0.5, 1.0e-12, 0.08)
 RAY_COUNT = NumericControl(3, 11, 2, 5)
 
@@ -274,3 +288,32 @@ def figure_size_for_elements(count: int) -> tuple[float, float]:
     )
     height = base_h + (0.35 if n >= 8 else 0.0)
     return (float(width), float(height))
+
+
+def zoom_window(
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    zoom: float = 1.0,
+    pan: float = 0.0,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Return cropped axis limits for schematic zoom/pan.
+
+    ``zoom`` >= 1 shrinks the visible span. ``pan`` in [-1, 1] shifts the
+    window as a fraction of half the full span.
+    """
+    z = max(float(zoom), 1.0e-9)
+    p = float(pan)
+    if z != z or p != p or abs(z) == float("inf") or abs(p) == float("inf"):
+        raise ValueError("zoom and pan must be finite.")
+    x_mid = 0.5 * (x_min + x_max)
+    y_mid = 0.5 * (y_min + y_max)
+    x_half = 0.5 * (x_max - x_min)
+    y_half = 0.5 * (y_max - y_min)
+    x_center = x_mid + p * x_half
+    y_center = y_mid
+    return (
+        (x_center - x_half / z, x_center + x_half / z),
+        (y_center - y_half / z, y_center + y_half / z),
+    )

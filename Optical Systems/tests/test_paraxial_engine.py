@@ -239,20 +239,6 @@ class MatrixOrderTests(unittest.TestCase):
             )
 
 
-class FigureLayoutTests(unittest.TestCase):
-    def test_figure_grows_with_element_count_then_clamps(self):
-        base = config.figure_size_for_elements(0)
-        wide = config.figure_size_for_elements(9)
-        clamped = config.figure_size_for_elements(40)
-        self.assertEqual(base, config.FIGURE_SIZE)
-        self.assertGreater(wide[0], base[0])
-        self.assertGreaterEqual(wide[1], base[1])
-        self.assertLessEqual(clamped[0], config.FIGURE_WIDTH_MAX)
-        self.assertEqual(
-            config.factor_card_style("thick_lens")["background"],
-            "#ffffff",
-        )
-
 
 class PrincipalAndConjugatePlaneTests(unittest.TestCase):
     def test_principal_plane_reduction_resolves_equivalent_thin_lens(self):
@@ -309,6 +295,85 @@ class PrincipalAndConjugatePlaneTests(unittest.TestCase):
         cardinal = engine.principal_planes(engine.thin_lens_matrix(10.0))
         with self.assertRaises(engine.ConjugateAtInfinityError):
             engine.conjugate_planes(cardinal, 0.1)
+
+    def test_thin_lens_vertex_distance_matches_principal_distance(self):
+        cardinal = engine.principal_planes(engine.thin_lens_matrix(10.0))
+        self.assertAlmostEqual(cardinal.object_principal_offset, 0.0)
+        self.assertAlmostEqual(cardinal.image_principal_offset, 0.0)
+        from_s = engine.conjugate_planes(cardinal, 0.2)
+        from_x = engine.conjugate_from_vertex_distance(
+            cardinal,
+            "object_to_v",
+            0.2,
+        )
+        self.assertAlmostEqual(from_x.object_distance, 0.2)
+        self.assertAlmostEqual(from_x.object_to_vertex, 0.2)
+        self.assertAlmostEqual(from_x.exit_vertex_to_image, from_s.image_distance)
+        np.testing.assert_allclose(from_x.matrix, from_s.matrix)
+
+    def test_thick_lens_either_mode_agrees(self):
+        cardinal = engine.principal_planes(
+            engine.thick_lens_matrix(1.5, 0.02, 5.0, 8.0)
+        )
+        x = 0.25
+        from_x = engine.conjugate_from_vertex_distance(cardinal, "object_to_v", x)
+        self.assertAlmostEqual(
+            from_x.object_distance,
+            x - cardinal.object_principal_offset,
+        )
+        self.assertAlmostEqual(
+            from_x.exit_vertex_to_image,
+            from_x.image_distance + cardinal.image_principal_offset,
+        )
+        from_xp = engine.conjugate_from_vertex_distance(
+            cardinal,
+            "v_prime_to_image",
+            from_x.exit_vertex_to_image,
+        )
+        np.testing.assert_allclose(from_xp.matrix, from_x.matrix, atol=1e-12)
+        self.assertAlmostEqual(from_xp.object_to_vertex, x)
+        self.assertAlmostEqual(
+            engine.gaussian_power(
+                from_x.object_distance,
+                from_x.image_distance,
+            ),
+            cardinal.power,
+        )
+
+    def test_vertex_distance_helpers_round_trip(self):
+        d = 0.03
+        d_prime = -0.01
+        s = 0.2
+        s_prime = 0.4
+        x = engine.vertex_from_object_distance(s, d)
+        self.assertAlmostEqual(engine.object_distance_from_vertex(x, d), s)
+        x_prime = engine.exit_vertex_from_image_distance(s_prime, d_prime)
+        self.assertAlmostEqual(
+            engine.image_distance_from_exit_vertex(x_prime, d_prime),
+            s_prime,
+        )
+
+
+class FigureLayoutTests(unittest.TestCase):
+    def test_figure_grows_with_element_count_then_clamps(self):
+        base = config.figure_size_for_elements(0)
+        wide = config.figure_size_for_elements(9)
+        clamped = config.figure_size_for_elements(40)
+        self.assertEqual(base, config.FIGURE_SIZE)
+        self.assertGreater(wide[0], base[0])
+        self.assertGreaterEqual(wide[1], base[1])
+        self.assertLessEqual(clamped[0], config.FIGURE_WIDTH_MAX)
+        self.assertEqual(
+            config.factor_card_style("thick_lens")["background"],
+            "#ffffff",
+        )
+
+    def test_zoom_window_shrinks_and_pans(self):
+        xlim, ylim = config.zoom_window(0.0, 10.0, -2.0, 2.0, zoom=2.0, pan=0.0)
+        self.assertAlmostEqual(xlim[1] - xlim[0], 5.0)
+        self.assertAlmostEqual(ylim[1] - ylim[0], 2.0)
+        shifted, _ = config.zoom_window(0.0, 10.0, -2.0, 2.0, zoom=1.0, pan=0.5)
+        self.assertAlmostEqual(0.5 * (shifted[0] + shifted[1]), 7.5)
 
 
 class RaySamplingTests(unittest.TestCase):
