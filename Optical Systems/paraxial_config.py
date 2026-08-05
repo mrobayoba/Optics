@@ -7,6 +7,7 @@ preset values live here so the front end does not duplicate numerical values.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 __all__ = [
     "NumericControl",
@@ -16,10 +17,14 @@ __all__ = [
     "LENGTH_UNIT_OPTIONS",
     "DEFAULT_LENGTH_UNIT",
     "MM_PER_METRE",
+    "PACKAGE_DIR",
+    "SAVES_DIR",
+    "SYSTEM_SAVE_VERSION",
     "REFRACTIVE_INDEX",
     "DISTANCE_M",
     "RADIUS_M",
     "SURFACE_POWER",
+    "MATRIX_ENTRY",
     "OBJECT_DISTANCE_M",
     "OBJECT_HEIGHT_M",
     "VERTEX_DISTANCE_M",
@@ -67,6 +72,7 @@ ELEMENT_OPTIONS = (
     ("Reflection Re", "reflection"),
     ("Thin lens", "thin_lens"),
     ("Thick lens", "thick_lens"),
+    ("System matrix M", "system_matrix"),
 )
 
 PRESET_OPTIONS = (
@@ -82,10 +88,15 @@ LENGTH_UNIT_OPTIONS = (
 DEFAULT_LENGTH_UNIT = "m"
 MM_PER_METRE = 1000.0
 
+PACKAGE_DIR = Path(__file__).resolve().parent
+SAVES_DIR = PACKAGE_DIR / "saves"
+SYSTEM_SAVE_VERSION = 1
+
 REFRACTIVE_INDEX = NumericControl(1.0, 3.0, 1.0e-12, 1.5)
 DISTANCE_M = NumericControl(-50.0, 50.0, 1.0e-12, 0.10)
 RADIUS_M = NumericControl(-1000.0, 1000.0, 1.0e-12, 0.10)
 SURFACE_POWER = NumericControl(-1.0e6, 1.0e6, 1.0e-12, 5.0)
+MATRIX_ENTRY = NumericControl(-1.0e12, 1.0e12, 1.0e-12, 0.0)
 OBJECT_DISTANCE_M = NumericControl(-100.0, 100.0, 1.0e-12, 0.20)
 OBJECT_HEIGHT_M = NumericControl(-10.0, 10.0, 1.0e-12, 0.02)
 VERTEX_DISTANCE_M = NumericControl(-100.0, 100.0, 1.0e-12, 0.20)
@@ -119,6 +130,7 @@ COLORS = {
     "reflection": "#ca8a04",
     "thin_lens": "#c026d3",
     "thick_lens": "#ffffff",
+    "system_matrix": "#475569",
     "result": "#334155",
     # Kept for older schematic call sites; prefer thin_lens / thick_lens.
     "lens": "#c026d3",
@@ -137,6 +149,7 @@ FACTOR_CARD_STYLES = {
     "reflection": {"border": "#ca8a04", "background": "#fef9c3"},
     "thin_lens": {"border": "#c026d3", "background": "#fae8ff"},
     "thick_lens": {"border": "#334155", "background": "#ffffff"},
+    "system_matrix": {"border": "#475569", "background": "#e2e8f0"},
     "result": {"border": "#334155", "background": "#f1f5f9"},
 }
 

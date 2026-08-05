@@ -9,3 +9,6 @@ venv/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# User-saved optical systems (keep the folder via .gitkeep)
+Optical Systems/saves/*.json

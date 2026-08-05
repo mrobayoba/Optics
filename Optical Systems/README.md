@@ -17,9 +17,10 @@ the notebook.
 - [`paraxial_tools.py`](paraxial_tools.py): logical components, one matrix per
   stack entry, system construction, geometry, and ray-fan sampling.
 - [`paraxial_dashboard_tools.py`](paraxial_dashboard_tools.py): matrix HTML and
-  Matplotlib optical schematics.
+  the equivalent-system schematic (`V`, `V′`, `H`, `H′` only).
 - [`paraxial_style.py`](paraxial_style.py): interactive element stack and live
-  matrix/principal/conjugate panels.
+  matrix/principal/conjugate panels, including save/load of systems.
+- [`saves/`](saves/): user-saved optical systems as JSON (gitignored `*.json`).
 - [`tests/test_paraxial_engine.py`](tests/test_paraxial_engine.py): MATLAB
   exercise, ordering, cardinal-plane, conjugate-plane, and ray tests.
 - [`context.md`](context.md): supporting course theory and sign conventions.
@@ -61,8 +62,12 @@ M_thin  = Ra(P2) @ Ra(P1)
 ```
 
 so a thick-lens component produces the same `M_VV'` as adding `Ra`, `T`,
-`Ra` separately. The row-state representation `[x, n*alpha] @ M` is used
-only for plotting ray fans; it matches the column action of these matrices.
+`Ra` separately. You can also insert a complete custom `M` (system matrix)
+with editable `M11…M22` entries; it must satisfy `det(M)=1`. The row-state
+representation `[x, n*alpha] @ M` is used only for plotting ray fans; it
+matches the column action of these matrices. The optical schematic shows the
+**equivalent** resolved system (`M_VV′`): one `V`/`V′` pair and one `H`/`H′`
+pair when principal planes exist—not each stack component separately.
 
 ## Analysis chain
 
@@ -73,7 +78,7 @@ start and finish vertices:
 
 ```text
 M_VV' = product of stack matrices with first component rightmost
-        (T, Ra, Re, M_thin, or M_thick)
+        (T, Ra, Re, M_thin, M_thick, or custom M)
 det(M_VV') = 1
 ```
 
@@ -177,13 +182,15 @@ From the repository root:
 
 Open `Optical Systems/paraxial_simulator.ipynb`, run all cells, then:
 
-1. load a preset or add translation, refraction, reflection, thin-lens, or
-   thick-lens components;
+1. load a preset or add translation, refraction, reflection, thin-lens,
+   thick-lens, or custom system-matrix (`M`) components;
 2. reorder components with the arrow buttons;
 3. inspect the elemental product and `M_VV'`;
 4. inspect the principal-plane reduction and values;
 5. choose Object→V (`x`) or V′→image (`x′`) and inspect conjugates, magnifications,
-   and the zoomable schematic.
+   and the equivalent-system schematic (`V`, `V′`, `H`, `H′`);
+6. optionally save the stack and analysis to `saves/<name>.json`, or load a
+   previously saved system (lengths/powers in the file are always SI).
 
 Plain Python example:
 

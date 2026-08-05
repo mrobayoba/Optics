@@ -14,9 +14,12 @@ later components pile on the left:
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping, Sequence
+from pathlib import Path
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
@@ -37,6 +40,11 @@ __all__ = [
     "trace_rays",
     "sample_ray_fan",
     "format_matrix",
+    "element_to_mapping",
+    "safe_system_filename",
+    "save_system",
+    "load_system",
+    "list_saved_systems",
 ]
 
 
@@ -48,6 +56,7 @@ class ElementKind(str, Enum):
     REFLECTION = "reflection"
     THIN_LENS = "thin_lens"
     THICK_LENS = "thick_lens"
+    SYSTEM_MATRIX = "system_matrix"
 
 
 @dataclass(frozen=True)
@@ -64,6 +73,10 @@ class OpticalElement:
     lens_index: float = 1.0
     first_power: float = 0.0
     second_power: float = 0.0
+    m11: float = 1.0
+    m12: float = 0.0
+    m21: float = 0.0
+    m22: float = 1.0
 
     def __post_init__(self) -> None:
         try:
@@ -166,6 +179,25 @@ class OpticalElement:
             second_power=second_power,
         )
 
+    @classmethod
+    def system_matrix(
+        cls,
+        label: str,
+        matrix: Sequence[Sequence[float]] | np.ndarray,
+    ) -> "OpticalElement":
+        """Insert a complete unit-determinant 2×2 system matrix (SI units)."""
+        values = np.asarray(matrix, dtype=float)
+        if values.shape != (2, 2):
+            raise ValueError("system matrix must be 2x2.")
+        return cls(
+            ElementKind.SYSTEM_MATRIX,
+            label,
+            m11=float(values[0, 0]),
+            m12=float(values[0, 1]),
+            m21=float(values[1, 0]),
+            m22=float(values[1, 1]),
+        )
+
     def matrix_factors(self) -> tuple[engine.MatrixFactor, ...]:
         """Return the single matrix contributed by this stack component."""
         if self.kind == ElementKind.TRANSLATION:
@@ -218,6 +250,21 @@ class OpticalElement:
                         f"(P₁={self.first_power:.6g}, P₂={self.second_power:.6g})"
                     ),
                     style_key="thin_lens",
+                ),
+            )
+
+        if self.kind == ElementKind.SYSTEM_MATRIX:
+            matrix = np.array(
+                [[self.m11, self.m12], [self.m21, self.m22]],
+                dtype=float,
+            )
+            determinant = engine.assert_unit_determinant(matrix)
+            return (
+                engine.MatrixFactor(
+                    f"M[{self.label}]",
+                    matrix,
+                    f"custom M_VV′; det={determinant:.6g}",
+                    style_key="system_matrix",
                 ),
             )
 
@@ -432,3 +479,143 @@ def format_matrix(matrix: np.ndarray, precision: int = config.MATRIX_PRECISION) 
         suppress_small=False,
         floatmode="maxprec_equal",
     )
+
+
+def element_to_mapping(element: OpticalElement) -> dict[str, Any]:
+    """Serialize one stack component to a preset-style mapping (SI units)."""
+    kind = ElementKind(element.kind)
+    payload: dict[str, Any] = {"kind": kind.value, "label": element.label}
+    if kind == ElementKind.TRANSLATION:
+        payload["refractive_index"] = float(element.refractive_index)
+        payload["distance"] = float(element.distance)
+        return payload
+    if kind == ElementKind.REFRACTION:
+        payload["incident_index"] = float(element.incident_index)
+        payload["transmitted_index"] = float(element.transmitted_index)
+        payload["radius"] = float(element.radius)
+        return payload
+    if kind == ElementKind.REFLECTION:
+        payload["incident_index"] = float(element.incident_index)
+        payload["radius"] = float(element.radius)
+        return payload
+    if kind == ElementKind.THIN_LENS:
+        payload["lens_index"] = float(element.lens_index)
+        payload["first_power"] = float(element.first_power)
+        payload["second_power"] = float(element.second_power)
+        return payload
+    if kind == ElementKind.THICK_LENS:
+        payload["lens_index"] = float(element.lens_index)
+        payload["distance"] = float(element.distance)
+        payload["first_power"] = float(element.first_power)
+        payload["second_power"] = float(element.second_power)
+        return payload
+    payload["m11"] = float(element.m11)
+    payload["m12"] = float(element.m12)
+    payload["m21"] = float(element.m21)
+    payload["m22"] = float(element.m22)
+    return payload
+
+
+def safe_system_filename(name: str) -> str:
+    """Return a filesystem-safe stem for a saved optical system."""
+    cleaned = re.sub(r"[^\w.\-]+", "_", str(name).strip(), flags=re.UNICODE)
+    cleaned = cleaned.strip("._")
+    if not cleaned:
+        raise ValueError("Save name must contain at least one letter or digit.")
+    return cleaned
+
+
+def list_saved_systems(directory: Path | None = None) -> list[str]:
+    """Return saved system stems (sorted) under ``directory``."""
+    root = Path(directory) if directory is not None else config.SAVES_DIR
+    if not root.is_dir():
+        return []
+    return sorted(path.stem for path in root.glob("*.json") if path.is_file())
+
+
+def save_system(
+    name: str,
+    elements: Sequence[OpticalElement],
+    analysis: Mapping[str, Any],
+    *,
+    length_unit: str = "m",
+    directory: Path | None = None,
+) -> Path:
+    """Write stack + analysis JSON under ``saves/`` (SI metres / m⁻¹)."""
+    root = Path(directory) if directory is not None else config.SAVES_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    stem = safe_system_filename(name)
+    path = root / f"{stem}.json"
+    required = (
+        "input_index",
+        "output_index",
+        "conjugate_mode",
+        "vertex_distance_m",
+        "object_height_m",
+        "ray_half_angle",
+        "ray_count",
+        "display_decimals",
+    )
+    missing = [key for key in required if key not in analysis]
+    if missing:
+        raise ValueError(f"analysis is missing keys: {', '.join(missing)}")
+    if length_unit not in ("m", "mm"):
+        raise ValueError("length_unit must be 'm' or 'mm'.")
+    payload = {
+        "version": config.SYSTEM_SAVE_VERSION,
+        "name": stem,
+        "length_unit": length_unit,
+        "analysis": {
+            "input_index": float(analysis["input_index"]),
+            "output_index": float(analysis["output_index"]),
+            "conjugate_mode": str(analysis["conjugate_mode"]),
+            "vertex_distance_m": float(analysis["vertex_distance_m"]),
+            "object_height_m": float(analysis["object_height_m"]),
+            "ray_half_angle": float(analysis["ray_half_angle"]),
+            "ray_count": int(analysis["ray_count"]),
+            "display_decimals": int(analysis["display_decimals"]),
+        },
+        "elements": [element_to_mapping(element) for element in elements],
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def load_system(
+    name: str,
+    *,
+    directory: Path | None = None,
+) -> dict[str, Any]:
+    """Load a saved system; elements are ``OpticalElement`` instances (SI)."""
+    root = Path(directory) if directory is not None else config.SAVES_DIR
+    stem = safe_system_filename(name)
+    path = root / f"{stem}.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"No saved system named {stem!r} in {root}.")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("Saved system file must contain a JSON object.")
+    version = int(raw.get("version", 0))
+    if version != config.SYSTEM_SAVE_VERSION:
+        raise ValueError(
+            f"Unsupported save version {version}; "
+            f"expected {config.SYSTEM_SAVE_VERSION}."
+        )
+    length_unit = str(raw.get("length_unit", "m"))
+    if length_unit not in ("m", "mm"):
+        raise ValueError("Saved length_unit must be 'm' or 'mm'.")
+    analysis_raw = raw.get("analysis")
+    if not isinstance(analysis_raw, Mapping):
+        raise ValueError("Saved system must include an analysis object.")
+    elements_raw = raw.get("elements")
+    if not isinstance(elements_raw, list):
+        raise ValueError("Saved system must include an elements list.")
+    elements = [OpticalElement.from_mapping(entry) for entry in elements_raw]
+    return {
+        "version": version,
+        "name": str(raw.get("name", stem)),
+        "length_unit": length_unit,
+        "analysis": dict(analysis_raw),
+        "elements": elements,
+        "path": path,
+    }

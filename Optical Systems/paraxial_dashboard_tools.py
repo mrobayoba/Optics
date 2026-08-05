@@ -190,21 +190,6 @@ def _draw_arrow(
     )
 
 
-def _element_plot_color(kind: tools.ElementKind) -> tuple[str, str, float]:
-    """Return (line color, edge/text color, line width) for a schematic element."""
-    colors = config.COLORS
-    if kind == tools.ElementKind.TRANSLATION:
-        return colors["translation"], colors["translation"], 3.0
-    if kind == tools.ElementKind.REFLECTION:
-        return colors["reflection"], colors["reflection"], 2.0
-    if kind == tools.ElementKind.THIN_LENS:
-        return colors["thin_lens"], colors["thin_lens"], 2.0
-    if kind == tools.ElementKind.THICK_LENS:
-        # White fill needs a dark stroke so it stays visible on the plot.
-        return colors["thick_lens"], colors["result"], 2.2
-    return colors["refraction"], colors["refraction"], 2.0
-
-
 def draw_optical_schematic(
     ax: Axes,
     elements: Sequence[tools.OpticalElement],
@@ -215,20 +200,24 @@ def draw_optical_schematic(
     length_scale: float = 1.0,
     length_unit: str = "m",
 ) -> Axes:
-    """Draw system vertices, elements, principal planes, object/image, and rays.
+    """Draw the equivalent system from resolved ``M_VV'``.
 
-    Geometry inputs are SI metres. ``length_scale`` converts plotted coordinates
-    into the dashboard display unit (1 for m, 1000 for mm).
+    Shows one entrance vertex ``V``, one exit vertex ``V'``, and when available
+    one principal-plane pair ``H``/``H'`` plus object/image conjugates. Stack
+    interiors are not drawn. ``trace`` is ignored (kept for call compatibility).
+    Geometry inputs are SI metres; ``length_scale`` converts to display units.
     """
+    del trace  # Elemental ray fans are not shown on the equivalent schematic.
     scale = float(length_scale)
     if not np.isfinite(scale) or scale <= 0.0:
         raise ValueError("length_scale must be a positive finite value.")
 
     geometry = tools.system_geometry(elements)
     colors = config.COLORS
-    label_size = 7 if len(elements) >= 8 else 8
+    v_position = geometry.start_vertex
+    v_prime_position = geometry.finish_vertex
 
-    coordinates = [geometry.start_vertex, geometry.finish_vertex]
+    coordinates = [v_position, v_prime_position]
     h_position = None
     h_prime_position = None
     object_position = None
@@ -236,10 +225,8 @@ def draw_optical_schematic(
     image_height = None
 
     if cardinal is not None:
-        h_position = geometry.start_vertex - cardinal.object_principal_offset
-        h_prime_position = (
-            geometry.finish_vertex + cardinal.image_principal_offset
-        )
+        h_position = v_position - cardinal.object_principal_offset
+        h_prime_position = v_prime_position + cardinal.image_principal_offset
         coordinates.extend((h_position, h_prime_position))
     if cardinal is not None and conjugate is not None:
         object_position = h_position - conjugate.object_distance
@@ -258,82 +245,46 @@ def draw_optical_schematic(
     padding = 0.08 * span
     ax.axhline(0.0, color=colors["axis"], lw=1.0, alpha=0.8)
 
-    for placement in geometry.placements:
-        if placement.kind == tools.ElementKind.TRANSLATION:
-            ax.plot(
-                [_x(placement.start), _x(placement.finish)],
-                [0.0, 0.0],
-                color=colors["translation"],
-                lw=3.0,
-                alpha=0.45,
-            )
-            continue
-        fill, stroke, width = _element_plot_color(placement.kind)
-        linestyle = "-." if placement.kind == tools.ElementKind.REFLECTION else "-"
-        if placement.kind == tools.ElementKind.THICK_LENS:
-            ax.axvline(
-                _x(placement.start),
-                color=stroke,
-                lw=width,
-                ls=linestyle,
-                alpha=0.95,
-            )
-            if placement.finish != placement.start:
-                ax.axvline(
-                    _x(placement.finish),
-                    color=stroke,
-                    lw=width,
-                    alpha=0.95,
-                )
-            # Light fill marker so white thick lenses remain distinct.
-            mid = _x((placement.start + placement.finish) / 2.0)
-            ax.plot(
-                [mid],
-                [0.0],
-                marker="s",
-                markersize=7,
-                markerfacecolor=fill,
-                markeredgecolor=stroke,
-                markeredgewidth=1.2,
-                linestyle="None",
-                zorder=5,
-            )
-        else:
-            ax.axvline(
-                _x(placement.start),
-                color=fill,
-                lw=width,
-                ls=linestyle,
-                alpha=0.9,
-            )
-            if placement.finish != placement.start:
-                ax.axvline(_x(placement.finish), color=fill, lw=width, alpha=0.9)
+    # Equivalent black-box band between V and V' (single system, not per component).
+    if not np.isclose(v_prime_position, v_position):
+        y_band = max(abs(_y(float(object_height))) * 1.2, 0.02 * span * scale)
+        ax.fill_between(
+            [_x(v_position), _x(v_prime_position)],
+            [-y_band, -y_band],
+            [y_band, y_band],
+            color=colors["panel"],
+            alpha=0.85,
+            zorder=0,
+        )
         ax.text(
-            _x((placement.start + placement.finish) / 2.0),
-            0.02,
-            placement.label,
-            color=stroke if placement.kind == tools.ElementKind.THICK_LENS else fill,
+            _x(0.5 * (v_position + v_prime_position)),
+            0.08,
+            "M_VV′",
+            color=colors["result"],
             ha="center",
             va="bottom",
             transform=ax.get_xaxis_transform(),
-            fontsize=label_size,
+            fontsize=8,
+            fontweight="bold",
         )
 
-    ax.axvline(_x(geometry.start_vertex), color=colors["axis"], lw=1.0, ls=":")
-    ax.axvline(_x(geometry.finish_vertex), color=colors["axis"], lw=1.0, ls=":")
+    ax.axvline(_x(v_position), color=colors["axis"], lw=1.6, ls="-")
+    ax.axvline(_x(v_prime_position), color=colors["axis"], lw=1.6, ls="-")
     ax.text(
-        _x(geometry.start_vertex),
+        _x(v_position),
         0.96,
         "V",
         transform=ax.get_xaxis_transform(),
         ha="center",
+        fontweight="bold",
     )
     ax.text(
-        _x(geometry.finish_vertex),
+        _x(v_prime_position),
         0.96,
         "V′",
         transform=ax.get_xaxis_transform(),
         ha="center",
+        fontweight="bold",
     )
 
     if h_position is not None and h_prime_position is not None:
@@ -356,6 +307,7 @@ def draw_optical_schematic(
             color=colors["principal"],
             transform=ax.get_xaxis_transform(),
             ha="center",
+            fontweight="bold",
         )
         ax.text(
             _x(h_prime_position),
@@ -364,24 +316,18 @@ def draw_optical_schematic(
             color=colors["principal"],
             transform=ax.get_xaxis_transform(),
             ha="center",
+            fontweight="bold",
         )
 
     plotted_heights = [abs(_y(float(object_height)))]
-    if trace is not None:
-        for ray in trace.heights:
-            ax.plot(
-                [_x(z) for z in trace.path_positions],
-                [_y(height) for height in ray],
-                color=colors["translation"],
-                lw=0.9,
-                alpha=0.35,
-            )
-        plotted_heights.append(float(np.max(np.abs(trace.heights))) * scale)
 
     if (
         object_position is not None
         and image_position is not None
         and image_height is not None
+        and conjugate is not None
+        and h_position is not None
+        and h_prime_position is not None
     ):
         _draw_arrow(
             ax,
@@ -435,6 +381,6 @@ def draw_optical_schematic(
     ax.set_ylim(-y_extent, y_extent)
     ax.set_xlabel(f"Optical path coordinate ({length_unit})")
     ax.set_ylabel(f"Ray height x ({length_unit})")
-    ax.set_title("Paraxial system, principal planes, and conjugate image")
+    ax.set_title("Equivalent M_VV′ system (V, V′, H, H′)")
     ax.grid(axis="x", alpha=0.15)
     return ax

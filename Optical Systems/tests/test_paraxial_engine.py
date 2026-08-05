@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 
@@ -224,6 +225,7 @@ class MatrixOrderTests(unittest.TestCase):
             tools.OpticalElement.reflection("Re1", 1.0, -0.2),
             tools.OpticalElement.thin_lens("L1", 5.0),
             tools.OpticalElement.thick_lens("L2", 1.5, 0.01, 5.0, 5.0),
+            tools.OpticalElement.system_matrix("S1", np.eye(2)),
         )
         expected = {
             "translation": "translation",
@@ -231,6 +233,7 @@ class MatrixOrderTests(unittest.TestCase):
             "reflection": "reflection",
             "thin_lens": "thin_lens",
             "thick_lens": "thick_lens",
+            "system_matrix": "system_matrix",
         }
         for element in samples:
             self.assertEqual(
@@ -238,6 +241,35 @@ class MatrixOrderTests(unittest.TestCase):
                 expected[element.kind.value],
             )
 
+    def test_system_matrix_identity_and_thin_lens_equivalent(self):
+        identity = tools.OpticalElement.system_matrix("I", np.eye(2))
+        report = tools.build_system([identity])
+        np.testing.assert_allclose(report.matrix, np.eye(2))
+        self.assertEqual(report.factors[0].label, "M[I]")
+
+        custom = tools.OpticalElement.system_matrix(
+            "S1",
+            engine.thin_lens_matrix(10.0),
+        )
+        np.testing.assert_allclose(custom.matrix, engine.thin_lens_matrix(10.0))
+        self.assertAlmostEqual(custom.axial_length, 0.0)
+
+    def test_system_matrix_rejects_non_unit_determinant(self):
+        with self.assertRaises(ValueError):
+            tools.OpticalElement.system_matrix("Bad", [[2.0, 0.0], [0.0, 1.0]])
+
+    def test_system_matrix_rightmost_first_with_translation(self):
+        translation = tools.OpticalElement.translation("T1", 1.0, 0.2)
+        system = tools.OpticalElement.system_matrix(
+            "S1",
+            engine.thin_lens_matrix(5.0),
+        )
+        report = tools.build_system((translation, system))
+        np.testing.assert_allclose(
+            report.matrix,
+            system.matrix @ translation.matrix,
+        )
+        self.assertEqual(report.product_expression, "M[S1] @ T[T1]")
 
 
 class PrincipalAndConjugatePlaneTests(unittest.TestCase):
@@ -352,6 +384,55 @@ class PrincipalAndConjugatePlaneTests(unittest.TestCase):
             engine.image_distance_from_exit_vertex(x_prime, d_prime),
             s_prime,
         )
+
+
+class SystemSaveLoadTests(unittest.TestCase):
+    def test_save_load_round_trip_restores_stack_and_analysis(self):
+        elements = [
+            tools.OpticalElement.thin_lens("L1", 5.0, 5.0, lens_index=1.5),
+            tools.OpticalElement.translation("T1", 1.0, 0.2),
+            tools.OpticalElement.system_matrix(
+                "M1",
+                [[1.0, -10.0], [0.0, 1.0]],
+            ),
+        ]
+        analysis = {
+            "input_index": 1.0,
+            "output_index": 1.0,
+            "conjugate_mode": "object_to_v",
+            "vertex_distance_m": 0.2,
+            "object_height_m": 0.02,
+            "ray_half_angle": 0.08,
+            "ray_count": 5,
+            "display_decimals": 6,
+        }
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = tools.save_system(
+                "my system!",
+                elements,
+                analysis,
+                length_unit="mm",
+                directory=root,
+            )
+            self.assertEqual(path.name, "my_system.json")
+            self.assertIn("my_system", tools.list_saved_systems(root))
+            loaded = tools.load_system("my_system", directory=root)
+            self.assertEqual(loaded["length_unit"], "mm")
+            self.assertEqual(loaded["analysis"]["conjugate_mode"], "object_to_v")
+            self.assertAlmostEqual(loaded["analysis"]["vertex_distance_m"], 0.2)
+            self.assertEqual(len(loaded["elements"]), 3)
+            for original, restored in zip(elements, loaded["elements"]):
+                self.assertEqual(original.kind, restored.kind)
+                self.assertEqual(original.label, restored.label)
+                np.testing.assert_allclose(original.matrix, restored.matrix)
+            before = tools.build_system(elements).matrix
+            after = tools.build_system(loaded["elements"]).matrix
+            np.testing.assert_allclose(before, after)
+
+    def test_safe_system_filename_rejects_empty(self):
+        with self.assertRaises(ValueError):
+            tools.safe_system_filename("???")
 
 
 class FigureLayoutTests(unittest.TestCase):

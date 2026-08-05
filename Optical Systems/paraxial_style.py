@@ -19,6 +19,13 @@ __all__ = ["ParaxialDashboard"]
 LengthUnit = Literal["m", "mm"]
 
 
+def _saved_system_options() -> list[tuple[str, str]]:
+    names = tools.list_saved_systems()
+    if not names:
+        return [("(none)", "")]
+    return [(name, name) for name in names]
+
+
 def _quantity(value: float, unit: str = "", decimals: int = 6) -> str:
     suffix = f" {unit}" if unit else ""
     digits = int(decimals)
@@ -238,6 +245,30 @@ class ParaxialDashboard:
             icon="folder-open",
             button_style="info",
         )
+        self.save_name = widgets.Text(
+            value="",
+            placeholder="system name",
+            description="Save as",
+            style={"description_width": "initial"},
+            layout=widgets.Layout(width="14rem"),
+        )
+        self.save_system_button = widgets.Button(
+            description="Save system",
+            icon="save",
+            button_style="success",
+            tooltip="Write the current stack and analysis to Optical Systems/saves/",
+        )
+        self.saved_system = widgets.Dropdown(
+            options=_saved_system_options(),
+            description="Saved",
+            style={"description_width": "initial"},
+        )
+        self.load_system_button = widgets.Button(
+            description="Load system",
+            icon="upload",
+            button_style="info",
+            tooltip="Replace the stack and analysis from a saved JSON file",
+        )
         self.new_element_kind = widgets.Dropdown(
             options=config.ELEMENT_OPTIONS,
             value=config.DEFAULT_ELEMENT_KIND,
@@ -397,6 +428,10 @@ class ParaxialDashboard:
             [
                 self.preset,
                 self.load_preset_button,
+                self.save_name,
+                self.save_system_button,
+                self.saved_system,
+                self.load_system_button,
                 self.new_element_kind,
                 self.add_element_button,
                 self.unit_toggle,
@@ -470,6 +505,8 @@ class ParaxialDashboard:
         self.load_preset_button.on_click(
             lambda _: self._load_preset(self.preset.value, refresh=True)
         )
+        self.save_system_button.on_click(lambda _: self._save_current_system())
+        self.load_system_button.on_click(lambda _: self._load_saved_system())
         self.add_element_button.on_click(lambda _: self._add_default_element())
         self.add_element_button_footer.on_click(lambda _: self._add_default_element())
         self.refresh_button.on_click(lambda _: self.refresh())
@@ -592,6 +629,26 @@ class ParaxialDashboard:
                 "P₂",
                 element.second_power,
             ),
+            "m11": self._row_numeric(
+                config.MATRIX_ENTRY,
+                "M11",
+                element.m11,
+            ),
+            "m12": self._power_control(
+                config.MATRIX_ENTRY,
+                "M12",
+                element.m12,
+            ),
+            "m21": self._length_control(
+                config.MATRIX_ENTRY,
+                "M21",
+                element.m21,
+            ),
+            "m22": self._row_numeric(
+                config.MATRIX_ENTRY,
+                "M22",
+                element.m22,
+            ),
         }
 
         ambient = config.REFRACTIVE_INDEX.minimum
@@ -655,6 +712,18 @@ class ParaxialDashboard:
                     power_helpers["first_power"],
                     power_helpers["second_power"],
                     lens_error,
+                ]
+            ),
+            tools.ElementKind.SYSTEM_MATRIX.value: widgets.VBox(
+                [
+                    widgets.HBox(
+                        [fields["m11"], fields["m12"]],
+                        layout=widgets.Layout(flex_flow="row wrap", gap="0.35rem"),
+                    ),
+                    widgets.HBox(
+                        [fields["m21"], fields["m22"]],
+                        layout=widgets.Layout(flex_flow="row wrap", gap="0.35rem"),
+                    ),
                 ]
             ),
         }
@@ -932,6 +1001,8 @@ class ParaxialDashboard:
                 id(fields["radius"]),
                 id(fields["first_power"]),
                 id(fields["second_power"]),
+                id(fields["m12"]),
+                id(fields["m21"]),
             }
             # Power calculators also register radius controls.
             for box in row["parameter_boxes"].values():
@@ -977,6 +1048,102 @@ class ParaxialDashboard:
         if refresh:
             self.refresh()
 
+    def _refresh_saved_system_list(self, select: str | None = None) -> None:
+        options = _saved_system_options()
+        self.saved_system.options = options
+        values = {value for _, value in options}
+        if select and select in values:
+            self.saved_system.value = select
+        elif self.saved_system.value not in values:
+            self.saved_system.value = options[0][1]
+
+    def _current_elements(self) -> list[tools.OpticalElement]:
+        return [self._element_from_row(row) for row in self.element_rows]
+
+    def _save_current_system(self) -> None:
+        name = str(self.save_name.value).strip() or "untitled"
+        try:
+            path = tools.save_system(
+                name,
+                self._current_elements(),
+                {
+                    "input_index": float(self.input_index.value),
+                    "output_index": float(self.output_index.value),
+                    "conjugate_mode": str(self.conjugate_mode.value),
+                    "vertex_distance_m": self._to_si_length(self.vertex_distance.value),
+                    "object_height_m": self._to_si_length(self.object_height.value),
+                    "ray_half_angle": float(self.ray_half_angle.value),
+                    "ray_count": int(self.ray_count.value),
+                    "display_decimals": int(self.display_decimals.value),
+                },
+                length_unit=self.length_unit,
+            )
+        except Exception as exc:
+            self._set_status(f"{type(exc).__name__}: {exc}", error=True)
+            return
+        self._refresh_saved_system_list(select=path.stem)
+        self.save_name.value = path.stem
+        self._set_status(f"Saved system to {path.name} (overwrites same name).")
+
+    def _load_saved_system(self) -> None:
+        name = str(self.saved_system.value).strip()
+        if not name:
+            self._set_status("No saved system selected.", error=True)
+            return
+        try:
+            payload = tools.load_system(name)
+        except Exception as exc:
+            self._set_status(f"{type(exc).__name__}: {exc}", error=True)
+            return
+
+        analysis = payload["analysis"]
+        target_unit = str(payload["length_unit"])
+        self._suspend_updates = True
+        try:
+            for row in self.element_rows:
+                self._forget_row_unit_controls(row)
+            analysis_ids = {id(self.vertex_distance), id(self.object_height)}
+            self._length_controls = [
+                item for item in self._length_controls if id(item[0]) in analysis_ids
+            ]
+            self._power_controls = []
+            self.element_rows = [
+                self._make_element_row(element) for element in payload["elements"]
+            ]
+            self._sync_element_box()
+            self.input_index.value = float(analysis["input_index"])
+            self.output_index.value = float(analysis["output_index"])
+            mode = str(analysis["conjugate_mode"])
+            mode_values = {value for _, value in config.CONJUGATE_MODE_OPTIONS}
+            if mode not in mode_values:
+                raise ValueError(f"Unknown conjugate_mode {mode!r}.")
+            self.conjugate_mode.value = mode
+            self._sync_vertex_distance_label()
+            self._assign_control_value(
+                self.vertex_distance,
+                self._from_si_length(float(analysis["vertex_distance_m"])),
+            )
+            self._assign_control_value(
+                self.object_height,
+                self._from_si_length(float(analysis["object_height_m"])),
+            )
+            self.ray_half_angle.value = float(analysis["ray_half_angle"])
+            self.ray_count.value = int(analysis["ray_count"])
+            self.display_decimals.value = int(analysis["display_decimals"])
+            self.save_name.value = str(payload["name"])
+        except Exception as exc:
+            self._suspend_updates = False
+            self._set_status(f"{type(exc).__name__}: {exc}", error=True)
+            return
+        finally:
+            self._suspend_updates = False
+
+        if target_unit != self.length_unit:
+            self._toggle_length_unit()
+        else:
+            self.refresh()
+        self._set_status(f"Loaded system {payload['name']!r}.")
+
     def _default_element(self, kind: str) -> tools.OpticalElement:
         index = len(self.element_rows) + 1
         if kind == tools.ElementKind.TRANSLATION.value:
@@ -1004,6 +1171,11 @@ class ParaxialDashboard:
                 config.SURFACE_POWER.default,
                 config.SURFACE_POWER.default,
                 lens_index=config.REFRACTIVE_INDEX.default,
+            )
+        if kind == tools.ElementKind.SYSTEM_MATRIX.value:
+            return tools.OpticalElement.system_matrix(
+                f"M{index}",
+                np.eye(2, dtype=float),
             )
         return tools.OpticalElement.thick_lens(
             f"L{index}",
@@ -1067,6 +1239,20 @@ class ParaxialDashboard:
                 self._to_si_power(fields["first_power"].value),
                 self._to_si_power(fields["second_power"].value),
                 lens_index=fields["lens_index"].value,
+            )
+        if kind == tools.ElementKind.SYSTEM_MATRIX:
+            return tools.OpticalElement.system_matrix(
+                label,
+                [
+                    [
+                        fields["m11"].value,
+                        self._to_si_power(fields["m12"].value),
+                    ],
+                    [
+                        self._to_si_length(fields["m21"].value),
+                        fields["m22"].value,
+                    ],
+                ],
             )
         return tools.OpticalElement.thick_lens(
             label,
@@ -1318,19 +1504,10 @@ class ParaxialDashboard:
         conjugate: engine.ConjugateReport | None,
     ) -> None:
         object_height_si = self._to_si_length(self.object_height.value)
-        trace = None
-        if elements:
-            trace = tools.sample_ray_fan(
-                elements,
-                object_height_si,
-                self.ray_half_angle.value,
-                self.ray_count.value,
-                self.input_index.value,
-            )
         with self.figure_output:
             self.figure_output.clear_output(wait=True)
             fig, ax = plt.subplots(
-                figsize=config.figure_size_for_elements(len(elements))
+                figsize=config.figure_size_for_elements(max(len(elements), 1))
             )
             visuals.draw_optical_schematic(
                 ax,
@@ -1338,14 +1515,9 @@ class ParaxialDashboard:
                 cardinal,
                 conjugate,
                 object_height_si,
-                trace,
+                trace=None,
                 length_scale=self._length_scale(),
                 length_unit=self._length_unit_label(),
-            )
-            visuals.apply_axis_window(
-                ax,
-                zoom=float(self.zoom_scale.value),
-                pan=float(self.zoom_pan.value),
             )
             fig.tight_layout()
             display(fig)
